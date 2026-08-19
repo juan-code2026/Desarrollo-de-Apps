@@ -1,0 +1,24 @@
+<div class="contenedor">
+  <h2>SIMPLE TO DO</h2>
+
+  <div class="formulario">
+    <input type="text" placeholder="Escribe tu tarea aquí..." [(ngModel)]="nuevaTarea" (keyup.enter)="agregarTarea()" />
+    <button (click)="agregarTarea()">Agregar</button>
+  </div>
+
+  <ul id="demoListaTareas">
+    <li *ngFor="let tarea of tareas; let i = index">
+      <span>{{ tareas }}</span>
+      <button (click)="eliminarTarea(i)">Eliminar</button>
+    </li>
+  </ul>
+
+  <div class="contador-tareas">
+    Total de tareas: <span>{{ tareas.length }}</span>
+  </div>
+</div>
+
+<router-outlet />
+
+
+<router-outlet />
