@@ -1,0 +1,20 @@
+<h1>Personajes de la API</h1>
+
+
+<div class="contenedor">
+    @if (cargando) {
+    <p>Cargando personajes desde la API...</p>
+    } @else if (personajes.length === 0) {
+    <p>No hay personajes para mostrar (o eliminaste todos de la lista).</p>
+    } @else {
+    <div class="grid">
+        @for (personaje of personajes; track personaje.id) {
+        <div class="tarjeta">
+            <img [src]="personaje.image" [alt]="personaje.name" />
+            <h3>{{ personaje.name }}</h3>
+            <button (click)="eliminarPersonaje(personaje.id)">Eliminar</button>
+        </div>
+        }
+    </div>
+    }
+</div>
