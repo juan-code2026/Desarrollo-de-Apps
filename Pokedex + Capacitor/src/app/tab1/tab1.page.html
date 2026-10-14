@@ -1,0 +1,92 @@
+<ion-header>
+  <ion-toolbar color="primary">
+    <ion-title>Galería de Evidencias</ion-title>
+  </ion-toolbar>
+
+  <ion-toolbar color="light">
+    <ion-item lines="none">
+      <ion-icon [name]="isHighDef() ? 'sparkles' : 'flash-off-outline'" slot="start" color="primary"></ion-icon>
+      <ion-label>
+        <h3>{{ isHighDef() ? 'Modo Alta Definición (1080p)' : 'Modo Ahorro de Datos (800px)' }}</h3>
+        <p>{{ isHighDef() ? 'Calidad 95% Mayor detalle' : 'Calidad 60% Carga rápida' }}</p>
+      </ion-label>
+      <ion-toggle [checked]="isHighDef()" (ionChange)="toggleQuality($event.detail.checked)">
+      </ion-toggle>
+    </ion-item>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+  <ion-grid>
+    <ion-row>
+      @for (photo of photoService.photos(); track photo.filepath; let i = $index) {
+      <ion-col size="12" size-md="6" size-lg="4">
+        <ion-card>
+          <ion-img [src]="photo.webPath" [alt]="photo.filepath"></ion-img>
+          <div class="ion-padding">
+            @if (recognizingPhotos()[photo.filepath]) {
+            <ion-item lines="none">
+              <ion-spinner name="crescent" slot="start"></ion-spinner>
+              <ion-label>Reconociendo Pokémon y consultando estadísticas...</ion-label>
+            </ion-item>
+            }
+
+            @if (recognitionErrors()[photo.filepath]; as recognitionError) {
+            <p class="search-error" role="alert">{{ recognitionError }}</p>
+            @if (!recognizingPhotos()[photo.filepath]) {
+            <ion-button fill="clear" expand="block" (click)="recognizePokemon(photo.filepath, photo.webPath)">
+              Reintentar
+            </ion-button>
+            }
+            }
+
+            @if (pokemonByPhoto()[photo.filepath]; as pokemon) {
+            <section class="pokemon-details" aria-live="polite">
+              <div class="pokemon-heading">
+                @if (pokemon.image) {
+                <img [src]="pokemon.image" [alt]="pokemon.name" />
+                }
+                <div>
+                  <h2>{{ pokemon.name | titlecase }} <span>#{{ pokemon.id }}</span></h2>
+                  <p>Tipo: {{ pokemon.types.join(', ') }}</p>
+                  @if (pokemon.confidence !== undefined) {
+                  <p>Confianza del reconocimiento: {{ pokemon.confidence | number:'1.0-0' }}%</p>
+                  }
+                </div>
+              </div>
+              <h3>Estadísticas base</h3>
+              <dl>
+                @for (stat of pokemon.stats; track stat.name) {
+                <div class="stat-row">
+                  <dt>{{ stat.name | titlecase }}</dt>
+                  <dd>{{ stat.value }}</dd>
+                </div>
+                }
+              </dl>
+            </section>
+            }
+
+            <ion-button color="danger" fill="clear" expand="block" (click)="photoService.deletePhoto(i)">
+              <ion-icon slot="start" name="trash-outline"></ion-icon>
+              Eliminar
+            </ion-button>
+          </div>
+        </ion-card>
+      </ion-col>
+      } @empty {
+      <ion-col size="12" class="ion-text-center">
+        <div style="margin-top: 60px; color: #64748b;">
+          <ion-icon name="camera" style="font-size: 48px; margin-bottom: 12px;"></ion-icon>
+          <p>No hay fotografías registradas.<br>Presione el botón inferior para comenzar.</p>
+        </div>
+      </ion-col>
+      }
+    </ion-row>
+  </ion-grid>
+
+  <ion-fab vertical="bottom" horizontal="center" slot="fixed">
+    <ion-fab-button (click)="takePhoto()">
+      <ion-icon name="camera"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
+</ion-content>
