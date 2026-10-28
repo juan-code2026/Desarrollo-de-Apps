@@ -1,0 +1,7 @@
+{
+  "name": "rueda",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular"
+}
