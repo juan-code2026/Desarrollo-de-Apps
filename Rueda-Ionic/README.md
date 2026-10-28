@@ -21,32 +21,38 @@ Tu computador debe tener acceso a la red del servidor. La API debe permitir CORS
 
 Para compilar la aplicación móvil con Capacitor, usa `ionic build` y luego agrega la plataforma requerida con `npx cap add android` o `npx cap add ios`.
 
-## Colaborar desde GitHub
+## Descargar para colaborar
 
-Clona el repositorio y ejecuta la aplicación dentro de esta carpeta:
+Clona la rama publicada que contiene el proyecto:
 
 ```powershell
-git clone https://github.com/juan-code2026/Desarrollo-de-Apps.git
+git clone --branch feat/rueda-ionic-frontend https://github.com/juan-code2026/Desarrollo-de-Apps.git
 cd Desarrollo-de-Apps\Rueda-Ionic
 npm install
 npm start
 ```
 
-Para trabajar en un cambio, crea una rama propia desde la raíz del repositorio:
+La app está en `Rueda-Ionic` para no interferir con los otros proyectos del repositorio. Abre esa carpeta en VS Code para usar las tareas de Ionic.
+
+Para compartir cambios en la misma rama:
+
+```powershell
+git pull
+git add .
+git commit -m "Describe el cambio"
+git push
+```
+
+Si van a trabajar en paralelo, cada persona puede crear una rama propia:
 
 ```powershell
 git switch -c feat/descripcion-del-cambio
-```
-
-Al terminar, guarda y publica la rama para compartirla:
-
-```powershell
-git add Rueda-Ionic
+git add .
 git commit -m "Describe el cambio"
 git push -u origin feat/descripcion-del-cambio
 ```
 
-Después, abre un pull request en GitHub para integrar la rama en `main`.
+Después, abran un pull request hacia `feat/rueda-ionic-frontend`.
 
 ## Funcionalidades conectadas
 
