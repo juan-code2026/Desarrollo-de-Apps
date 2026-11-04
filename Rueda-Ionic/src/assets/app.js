@@ -1,4 +1,6 @@
 const STORAGE_KEYS = { token: 'rueda_token', user: 'rueda_user', apiUrl: 'rueda_api_url' };
+const DEMO_TOKEN = 'rueda-local-client-demo';
+const DEMO_DATA_KEY = 'rueda_client_demo_data';
 const DEFAULT_API_URL = 'http://20.20.1.52:8000/api';
 const app = document.querySelector('#main-content');
 const topbarActions = document.querySelector('#topbar-actions');
@@ -19,6 +21,168 @@ function apiUrl() {
   return (!savedUrl || savedUrl.replace(/\/+$/, '') === previousDefault
     ? DEFAULT_API_URL
     : savedUrl).replace(/\/+$/, '');
+}
+
+function isDemoClient() {
+  return sessionStorage.getItem(STORAGE_KEYS.token) === DEMO_TOKEN;
+}
+
+function demoData() {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(DEMO_DATA_KEY) || 'null');
+    if (stored && Array.isArray(stored.trips)) return stored;
+  } catch {
+    sessionStorage.removeItem(DEMO_DATA_KEY);
+  }
+
+  return {
+    nextId: 7002,
+    active: null,
+    trips: [{
+      id: 7001,
+      status: 'completed',
+      origin_name: 'Parque de la 93, Bogotá',
+      destination_name: 'Zona T, Bogotá',
+      completed_at: new Date(Date.now() - 86400000).toISOString(),
+      final_fare: 8200,
+      driver: { user: { name: 'Camila Rodríguez' } },
+      vehicle: { plate: 'RDA-245' },
+      rating: null,
+    }],
+  };
+}
+
+function saveDemoData(data) {
+  sessionStorage.setItem(DEMO_DATA_KEY, JSON.stringify(data));
+}
+
+function demoEstimate(values) {
+  const radians = (degrees) => degrees * Math.PI / 180;
+  const lat1 = Number(values.origin_latitude);
+  const lon1 = Number(values.origin_longitude);
+  const lat2 = Number(values.destination_latitude);
+  const lon2 = Number(values.destination_longitude);
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) {
+    throw new Error('Ingresa coordenadas válidas para origen y destino.');
+  }
+
+  const earthRadiusKm = 6371;
+  const latitudeDelta = radians(lat2 - lat1);
+  const longitudeDelta = radians(lon2 - lon1);
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(radians(lat1)) * Math.cos(radians(lat2))
+    * Math.sin(longitudeDelta / 2) ** 2;
+  const distanceKm = earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  const durationMin = Math.max(1, Math.ceil(distanceKm / 30 * 60));
+  const fareBreakdown = {
+    base_fare: 3800,
+    price_per_km: 1250,
+    price_per_minute: 250,
+    minimum_fare: 6500,
+    surge_multiplier: 1,
+  };
+  const estimatedFare = Math.max(
+    fareBreakdown.minimum_fare,
+    (fareBreakdown.base_fare + distanceKm * fareBreakdown.price_per_km
+      + durationMin * fareBreakdown.price_per_minute) * fareBreakdown.surge_multiplier,
+  );
+
+  return {
+    distance_km: Number(distanceKm.toFixed(2)),
+    duration_min: durationMin,
+    estimated_fare: Math.round(estimatedFare / 100) * 100,
+    currency: 'COP',
+    fare_breakdown: fareBreakdown,
+  };
+}
+
+async function demoRequest(path, options = {}) {
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  const method = (options.method || 'GET').toUpperCase();
+  const data = demoData();
+
+  if (path === '/fares/active' && method === 'GET') {
+    return {
+      success: true,
+      fare: {
+        id: 1,
+        name: 'Tarifa Estándar Urbana (demo)',
+        base_fare: 3800,
+        price_per_km: 1250,
+        price_per_minute: 250,
+        minimum_fare: 6500,
+        surge_multiplier: 1,
+        active: true,
+      },
+    };
+  }
+  if (path === '/client/active' && method === 'GET') {
+    return { success: true, has_active: Boolean(data.active), type: 'ride_request', data: data.active };
+  }
+  if (path === '/client/trips' && method === 'GET') {
+    return { success: true, trips: { data: data.trips } };
+  }
+  if (path === '/client/estimate-fare' && method === 'POST') {
+    return { success: true, estimate: demoEstimate(JSON.parse(options.body || '{}')) };
+  }
+  if (path === '/client/ride-requests' && method === 'POST') {
+    if (data.active) {
+      throw new Error('Ya tienes un viaje activo en la demostración.');
+    }
+    const values = JSON.parse(options.body || '{}');
+    const estimate = demoEstimate(values);
+    data.active = {
+      id: data.nextId++,
+      status: 'requested',
+      origin_name: values.origin_name,
+      origin_latitude: Number(values.origin_latitude),
+      origin_longitude: Number(values.origin_longitude),
+      destination_name: values.destination_name,
+      destination_latitude: Number(values.destination_latitude),
+      destination_longitude: Number(values.destination_longitude),
+      estimated_distance_km: estimate.distance_km,
+      estimated_duration_min: estimate.duration_min,
+      estimated_fare: estimate.estimated_fare,
+      created_at: new Date().toISOString(),
+    };
+    saveDemoData(data);
+    return {
+      success: true,
+      message: 'Solicitud creada en modo demo. No se envió al servidor.',
+      ride_request: data.active,
+    };
+  }
+  if (path.startsWith('/client/cancel/') && method === 'POST') {
+    if (!data.active || String(data.active.id) !== path.split('/').pop()) {
+      throw new Error('No se encontró un viaje demo activo para cancelar.');
+    }
+    const values = JSON.parse(options.body || '{}');
+    data.trips.unshift({
+      ...data.active,
+      status: 'cancelled',
+      cancellation_reason: values.reason || 'Cancelado en modo demo',
+      completed_at: new Date().toISOString(),
+      final_fare: 0,
+    });
+    data.active = null;
+    saveDemoData(data);
+    return { success: true, message: 'Viaje cancelado en modo demo.' };
+  }
+  if (path.startsWith('/client/trips/') && path.endsWith('/rating') && method === 'POST') {
+    const tripId = path.split('/')[3];
+    const trip = data.trips.find((item) => String(item.id) === tripId);
+    if (!trip || trip.status !== 'completed') {
+      throw new Error('Solo puedes calificar viajes demo completados.');
+    }
+    trip.rating = JSON.parse(options.body || '{}');
+    saveDemoData(data);
+    return { success: true, message: 'Calificación guardada en modo demo.' };
+  }
+  if (path === '/auth/logout' && method === 'POST') {
+    return { success: true, message: 'Sesión demo cerrada.' };
+  }
+
+  throw new Error(`La acción ${method} ${path} no está disponible en la demostración local.`);
 }
 
 function escapeHtml(value) {
@@ -52,6 +216,8 @@ function showToast(message, isError = false) {
 }
 
 async function request(path, options = {}) {
+  if (isDemoClient()) return demoRequest(path, options);
+
   const token = sessionStorage.getItem(STORAGE_KEYS.token);
   const headers = { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -121,6 +287,7 @@ function authPage(mode = 'login') {
           `}
           <button class="btn btn-primary full-width" type="submit" style="margin-top:5px">${registering ? 'Crear cuenta' : 'Iniciar sesión'} <span aria-hidden="true">→</span></button>
         </form>
+        ${!registering ? '<div class="demo-access"><p><strong>¿Servidor apagado?</strong> Puedes explorar el panel de cliente con información local de demostración.</p><button class="btn btn-outline full-width" type="button" data-action="demo-client">Entrar a la demo de cliente</button><span>Las solicitudes y cambios de esta demo no se envían a la API.</span></div>' : ''}
         ${!registering ? '<button class="link-button" data-action="forgot-password" style="margin-top:13px;font-size:12px">¿Olvidaste tu contraseña?</button>' : ''}
         <details class="config">
           <summary>Configuración de conexión</summary>
@@ -264,6 +431,7 @@ async function renderClient() {
   const tripsHtml = trips.length ? trips.slice(0, 5).map((trip) => `<article class="record trip-record"><div><h3>Viaje #${escapeHtml(trip.id)}</h3><p>${escapeHtml(trip.origin_name || trip.request?.origin_name || 'Origen')} → ${escapeHtml(trip.destination_name || trip.request?.destination_name || 'Destino')}</p><p>${escapeHtml(trip.driver?.user?.name || 'Conductor')} · ${escapeHtml(trip.vehicle?.plate || '')}</p><p>${dateTime(trip.completed_at || trip.created_at)}</p>${trip.status === 'completed' && !trip.rating ? `<div class="record-actions"><button class="btn btn-outline btn-small" data-action="rate-trip" data-id="${escapeHtml(trip.id)}">Calificar viaje</button></div>` : ''}</div><div class="record-right">${statusBadge(trip.status)}<p class="inline-meta" style="margin-top:9px">${money(trip.final_fare)}</p></div></article>`).join('') : emptyState('Tus viajes finalizados aparecerán aquí.', '◷');
 
   app.innerHTML = `
+    ${isDemoClient() ? '<div class="demo-mode-banner"><span aria-hidden="true">●</span><div><strong>Modo de demostración local</strong><span>Los viajes, tarifas y calificaciones de esta vista son ejemplos; nada se envía al servidor.</span></div></div>' : ''}
     <section class="client-hero">
       <div class="client-hero-copy">
         <p class="client-kicker"><span class="client-kicker-dot"></span> TU CIUDAD, MÁS CERCA</p>
@@ -573,6 +741,21 @@ async function handleClick(event) {
   try {
     if (action === 'home' || action === 'show-login') { event.preventDefault(); authPage('login'); }
     else if (action === 'show-register') authPage('register');
+    else if (action === 'demo-client') {
+      sessionStorage.setItem(STORAGE_KEYS.token, DEMO_TOKEN);
+      sessionUser = {
+        id: 700,
+        name: 'Sofía Demo',
+        email: 'sofia.demo@rueda.local',
+        role: 'client',
+        status: 'active',
+      };
+      sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(sessionUser));
+      lastEstimate = null;
+      updateTopbar();
+      await renderDashboard();
+      showToast('Entraste a la demostración local del panel de cliente.');
+    }
     else if (action === 'logout') {
       try { await request('/auth/logout', { method: 'POST', body: JSON.stringify({}) }); }
       catch (error) { console.warn('La API no confirmó el cierre de sesión:', error.message); }
@@ -638,6 +821,11 @@ async function init() {
     return;
   }
   updateTopbar();
+  if (isDemoClient()) {
+    sessionUser = readStoredUser();
+    await renderDashboard();
+    return;
+  }
   try {
     const result = await request('/auth/me');
     if (result.user) {

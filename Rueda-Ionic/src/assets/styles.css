@@ -156,6 +156,16 @@ td:last-child, th:last-child { padding-right: 0; }
 .nav-chip.active { background: var(--ink); color: white; border-color: var(--ink); }
 .notice { padding: 12px 14px; background: #fff8e4; color: #786322; font-size: 12px; line-height: 1.5; border-radius: 6px; }
 .error-box { margin-top: 13px; padding: 12px; border-radius: 5px; background: #fff2f1; color: #9e403a; font-size: 12px; line-height: 1.5; }
+.demo-access { display: grid; gap: 8px; margin-top: 17px; padding: 14px; border: 1px solid var(--slate-light); border-radius: 8px; background: #CFD8DC55; }
+.demo-access p { margin: 0; color: var(--slate-dark); font-size: 12px; line-height: 1.55; }
+.demo-access > span { color: var(--slate); font-size: 10px; line-height: 1.45; }
+.demo-access .btn-outline { border-color: var(--slate); color: var(--slate-dark); }
+.demo-access .btn-outline:hover { background: #B0BEC555; }
+.demo-mode-banner { display: flex; align-items: flex-start; gap: 11px; margin: 0 0 18px; padding: 13px 16px; border: 1px solid var(--slate); border-radius: 10px; background: #B0BEC555; color: var(--slate-dark); }
+.demo-mode-banner > span { margin-top: 2px; color: var(--slate); font-size: 10px; }
+.demo-mode-banner div { display: grid; gap: 3px; }
+.demo-mode-banner strong { font-size: 12px; }
+.demo-mode-banner div span { color: var(--slate); font-size: 11px; line-height: 1.5; }
 
 .client-hero {
   position: relative;

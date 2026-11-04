@@ -19,6 +19,10 @@ La URL inicial configurada es `http://20.20.1.52:8000/api`. Si cambia o necesita
 
 Tu computador debe tener acceso a la red del servidor. La API debe permitir CORS desde el origen del frontend. Si no se puede conectar, verifica que el servidor esté encendido, que la URL incluya `/api` y que el backend tenga habilitado CORS para el frontend.
 
+### Probar el panel de cliente sin el servidor
+
+En la pantalla de inicio de sesión, pulsa **Entrar a la demo de cliente**. El modo demo usa información ficticia y cálculos locales para probar el panel, cotizar rutas, crear/cancelar solicitudes y calificar el viaje de ejemplo. No llama a la API. Sus cambios se guardan solo en la sesión actual del navegador y se borran al cerrar la pestaña.
+
 Para compilar la aplicación móvil con Capacitor, usa `ionic build` y luego agrega la plataforma requerida con `npx cap add android` o `npx cap add ios`.
 
 ## Descargar para colaborar
