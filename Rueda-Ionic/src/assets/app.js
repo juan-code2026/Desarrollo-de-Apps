@@ -1,5 +1,5 @@
 const STORAGE_KEYS = { token: 'rueda_token', user: 'rueda_user', apiUrl: 'rueda_api_url' };
-const DEFAULT_API_URL = 'http://20.20.1.157:8000/api';
+const DEFAULT_API_URL = 'http://20.20.1.52:8000/api';
 const app = document.querySelector('#main-content');
 const topbarActions = document.querySelector('#topbar-actions');
 let sessionUser = readStoredUser();
@@ -14,7 +14,11 @@ function readStoredUser() {
 }
 
 function apiUrl() {
-  return (localStorage.getItem(STORAGE_KEYS.apiUrl) || DEFAULT_API_URL).replace(/\/+$/, '');
+  const savedUrl = localStorage.getItem(STORAGE_KEYS.apiUrl);
+  const previousDefault = 'http://20.20.1.157:8000/api';
+  return (!savedUrl || savedUrl.replace(/\/+$/, '') === previousDefault
+    ? DEFAULT_API_URL
+    : savedUrl).replace(/\/+$/, '');
 }
 
 function escapeHtml(value) {
@@ -244,30 +248,72 @@ async function renderClient() {
   const active = findActive(activeResponse);
   const trips = extractArray(tripsResponse, 'trips');
   const fare = fareResponse.fare;
+  const firstName = escapeHtml((sessionUser.name || '').trim().split(/\s+/)[0] || 'viajero/a');
+  const activeLocation = active?.driver?.latest_location;
+  const mapUrl = activeLocation?.latitude && activeLocation?.longitude
+    ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(activeLocation.latitude)}&mlon=${encodeURIComponent(activeLocation.longitude)}#map=16/${encodeURIComponent(activeLocation.latitude)}/${encodeURIComponent(activeLocation.longitude)}`
+    : null;
   const activeHtml = active ? `
-    <article class="record"><div><h3>Viaje activo #${escapeHtml(active.id)}</h3>${tripPath(active.origin_name, active.destination_name)}${active.driver ? `<p>Conductor: ${escapeHtml(active.driver.user?.name || 'Asignado')} · ${escapeHtml(active.driver.user?.phone || '')}</p>` : ''}${active.vehicle ? `<p>Vehículo: ${escapeHtml([active.vehicle.color, active.vehicle.brand, active.vehicle.model, active.vehicle.plate].filter(Boolean).join(' · '))}</p>` : ''}<div class="record-actions"><a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${encodeURIComponent(active.driver?.latest_location?.latitude || '')}&mlon=${encodeURIComponent(active.driver?.latest_location?.longitude || '')}#map=16/${encodeURIComponent(active.driver?.latest_location?.latitude || '')}/${encodeURIComponent(active.driver?.latest_location?.longitude || '')}">Ver ubicación en mapa ↗</a>${!['in_progress', 'completed', 'cancelled'].includes(active.status) ? `<button class="btn btn-danger btn-small" data-action="cancel-ride" data-id="${escapeHtml(active.id)}">Cancelar viaje</button>` : ''}</div></div><div class="record-right">${statusBadge(active.status)}<p class="inline-meta" style="margin-top:10px">${money(active.estimated_fare || active.final_fare)}</p></div></article>` : emptyState('Cuando pidas un viaje, aquí podrás seguir su estado.');
-  const tripsHtml = trips.length ? trips.slice(0, 5).map((trip) => `<article class="record"><div><h3>Viaje #${escapeHtml(trip.id)}</h3><p>${escapeHtml(trip.driver?.user?.name || 'Conductor')} · ${escapeHtml(trip.vehicle?.plate || '')}</p><p>${dateTime(trip.completed_at)}</p>${trip.status === 'completed' && !trip.rating ? `<div class="record-actions"><button class="btn btn-outline btn-small" data-action="rate-trip" data-id="${escapeHtml(trip.id)}">Calificar viaje</button></div>` : ''}</div><div class="record-right">${statusBadge(trip.status)}<p class="inline-meta" style="margin-top:9px">${money(trip.final_fare)}</p></div></article>`).join('') : emptyState('Tus viajes finalizados aparecerán aquí.', '◷');
+    <article class="active-ride">
+      <div class="active-ride-top"><div><span class="ride-label">VIAJE #${escapeHtml(active.id)}</span><h3>${escapeHtml(STATUS_LABELS[active.status] || active.status || 'En proceso')}</h3></div>${statusBadge(active.status)}</div>
+      <div class="route-summary">${tripPath(active.origin_name, active.destination_name)}</div>
+      ${active.driver ? `<div class="driver-summary"><span class="driver-avatar" aria-hidden="true">${escapeHtml((active.driver.user?.name || 'C').slice(0, 1))}</span><div><strong>${escapeHtml(active.driver.user?.name || 'Conductor asignado')}</strong><span>${escapeHtml(active.driver.user?.phone || 'Tu conductor')}</span></div></div>` : ''}
+      ${active.vehicle ? `<p class="vehicle-summary">${escapeHtml([active.vehicle.color, active.vehicle.brand, active.vehicle.model, active.vehicle.plate].filter(Boolean).join(' · '))}</p>` : ''}
+      <div class="active-ride-bottom"><div><span class="inline-meta">Valor estimado</span><strong class="fare-value">${money(active.estimated_fare || active.final_fare)}</strong></div><div class="record-actions">${mapUrl ? `<a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="${mapUrl}">Ver ubicación ↗</a>` : ''}${!['in_progress', 'completed', 'cancelled'].includes(active.status) ? `<button class="btn btn-danger btn-small" data-action="cancel-ride" data-id="${escapeHtml(active.id)}">Cancelar</button>` : ''}</div></div>
+    </article>` : emptyState('Cuando pidas un viaje, aquí podrás ver el estado y los datos de tu conductor.', '↗');
+  const tripsHtml = trips.length ? trips.slice(0, 5).map((trip) => `<article class="record trip-record"><div><h3>Viaje #${escapeHtml(trip.id)}</h3><p>${escapeHtml(trip.origin_name || trip.request?.origin_name || 'Origen')} → ${escapeHtml(trip.destination_name || trip.request?.destination_name || 'Destino')}</p><p>${escapeHtml(trip.driver?.user?.name || 'Conductor')} · ${escapeHtml(trip.vehicle?.plate || '')}</p><p>${dateTime(trip.completed_at || trip.created_at)}</p>${trip.status === 'completed' && !trip.rating ? `<div class="record-actions"><button class="btn btn-outline btn-small" data-action="rate-trip" data-id="${escapeHtml(trip.id)}">Calificar viaje</button></div>` : ''}</div><div class="record-right">${statusBadge(trip.status)}<p class="inline-meta" style="margin-top:9px">${money(trip.final_fare)}</p></div></article>`).join('') : emptyState('Tus viajes finalizados aparecerán aquí.', '◷');
 
-  app.innerHTML = `${pageHeader(`Hola, ${escapeHtml((sessionUser.name || '').split(' ')[0] || 'viajero/a')}.`, '¿A dónde vamos hoy?')}
-    <div class="stat-grid">${statCard('Tarifa mínima', money(fare?.minimum_fare), fare?.name || 'Tarifa urbana activa')}${statCard('Por kilómetro', money(fare?.price_per_km), 'Estimación según la ruta')}${statCard('Por minuto', money(fare?.price_per_minute), 'El valor final puede variar')}${statCard('Viajes realizados', trips.length, 'En tu historial')}</div>
-    <div class="content-grid">
-      <section class="card section-card"><div class="section-title"><h2>Solicita un viaje</h2><span class="status status-green">Bogotá</span></div>
+  app.innerHTML = `
+    <section class="client-hero">
+      <div class="client-hero-copy">
+        <p class="client-kicker"><span class="client-kicker-dot"></span> TU CIUDAD, MÁS CERCA</p>
+        <h1>Hola, ${firstName}.<br><span>¿A dónde vamos hoy?</span></h1>
+        <p>Muévete a tu ritmo. Cotiza tu recorrido antes de pedir y sigue tu viaje desde aquí.</p>
+        <button class="btn btn-primary client-hero-cta" data-action="focus-ride">Pedir un viaje <span aria-hidden="true">→</span></button>
+        <div class="client-hero-meta"><span>Viajes urbanos</span><span>Tarifa transparente</span></div>
+      </div>
+      <div class="route-art" aria-hidden="true">
+        <div class="route-art-grid"></div>
+        <svg viewBox="0 0 360 270" role="presentation">
+          <path class="route-road" d="M56 222C103 203 93 164 148 157s40-46 85-54 42-38 76-54"/>
+          <circle class="route-point route-point-start" cx="56" cy="222" r="13"/>
+          <circle class="route-point route-point-end" cx="309" cy="49" r="13"/>
+          <circle class="route-point-inner" cx="56" cy="222" r="4"/>
+          <rect class="route-point-inner route-point-square" x="305" y="45" width="8" height="8" rx="1"/>
+        </svg>
+        <div class="route-art-label"><span>RECORRIDO</span><strong>Tu próximo destino</strong></div>
+        <span class="route-art-chip">RUEDA <b>·</b> BOGOTÁ</span>
+      </div>
+    </section>
+
+    <section class="client-stats" aria-label="Tarifas y actividad">
+      ${statCard('Tarifa mínima', money(fare?.minimum_fare), fare?.name || 'Tarifa urbana activa')}
+      ${statCard('Precio por km', money(fare?.price_per_km), 'Calculado según tu recorrido')}
+      ${statCard('Precio por minuto', money(fare?.price_per_minute), 'El total se estima antes de pedir')}
+      ${statCard('Viajes realizados', trips.length, 'En tu historial reciente')}
+    </section>
+
+    <div class="content-grid client-content-grid">
+      <section id="ride-request" class="card section-card client-request-card">
+        <div class="section-title client-section-title"><div><p class="eyebrow">EMPIEZA TU RECORRIDO</p><h2>Arma tu viaje</h2><p class="muted">Cuéntanos dónde te recogemos y a dónde vas.</p></div><span class="city-chip"><span aria-hidden="true">⌖</span> Bogotá</span></div>
         <form id="ride-form" class="trip-form">
-          <div class="location-fields">
+          <div class="location-fields client-location-fields">
             <span class="location-marker"></span>
-            <div class="field"><label for="origin_name">Punto de recogida</label><input id="origin_name" name="origin_name" required value="Parque de la 93, Bogotá" placeholder="Dirección o lugar"></div>
-            <div class="form-row"><div class="field"><label for="origin_latitude">Latitud</label><input id="origin_latitude" name="origin_latitude" type="number" step="any" required value="4.6766"></div><div class="field"><label for="origin_longitude">Longitud</label><input id="origin_longitude" name="origin_longitude" type="number" step="any" required value="-74.0483"></div></div>
+            <div class="field"><label for="origin_name">Punto de recogida</label><input id="origin_name" name="origin_name" required placeholder="Ej. Parque de la 93, Bogotá" autocomplete="street-address"></div>
+            <div class="coordinate-row"><div class="field"><label for="origin_latitude">Latitud de recogida</label><input id="origin_latitude" name="origin_latitude" type="number" step="any" min="-90" max="90" required placeholder="4.6766" inputmode="decimal"></div><div class="field"><label for="origin_longitude">Longitud de recogida</label><input id="origin_longitude" name="origin_longitude" type="number" step="any" min="-180" max="180" required placeholder="-74.0483" inputmode="decimal"></div></div>
             <span class="location-marker destination"></span>
-            <div class="field"><label for="destination_name">¿A dónde vas?</label><input id="destination_name" name="destination_name" required value="Centro Comercial Andino, Bogotá" placeholder="Dirección o lugar"></div>
-            <div class="form-row"><div class="field"><label for="destination_latitude">Latitud</label><input id="destination_latitude" name="destination_latitude" type="number" step="any" required value="4.6664"></div><div class="field"><label for="destination_longitude">Longitud</label><input id="destination_longitude" name="destination_longitude" type="number" step="any" required value="-74.0536"></div></div>
+            <div class="field"><label for="destination_name">Destino</label><input id="destination_name" name="destination_name" required placeholder="Ej. Centro Comercial Andino, Bogotá"></div>
+            <div class="coordinate-row"><div class="field"><label for="destination_latitude">Latitud de destino</label><input id="destination_latitude" name="destination_latitude" type="number" step="any" min="-90" max="90" required placeholder="4.6664" inputmode="decimal"></div><div class="field"><label for="destination_longitude">Longitud de destino</label><input id="destination_longitude" name="destination_longitude" type="number" step="any" min="-180" max="180" required placeholder="-74.0536" inputmode="decimal"></div></div>
           </div>
+          <p class="coordinate-hint"><span aria-hidden="true">ⓘ</span> Para cotizar y pedir el viaje, ingresa las coordenadas de ambos puntos.</p>
           <div id="estimate-result">${lastEstimate ? estimateMarkup(lastEstimate) : ''}</div>
-          <div class="form-row"><button type="button" class="btn btn-outline" data-action="estimate-fare">Calcular tarifa</button><button type="submit" class="btn btn-primary" ${active ? 'disabled' : ''}>Pedir viaje →</button></div>
-          <p class="field-hint">Puedes editar las coordenadas según tu punto exacto. Los valores iniciales son una ruta de ejemplo en Bogotá.</p>
+          <div class="ride-actions"><button type="button" class="btn btn-outline" data-action="estimate-fare">Calcular tarifa</button><button type="submit" class="btn btn-primary" ${active ? 'disabled' : ''}>Pedir viaje <span aria-hidden="true">→</span></button></div>
         </form>
       </section>
-      <div class="stack"><section class="card section-card"><div class="section-title"><h2>Tu viaje actual</h2><button class="btn btn-outline btn-small" data-action="refresh">Actualizar</button></div>${activeHtml}</section>
-      <section class="card section-card"><div class="section-title"><h2>Actividad reciente</h2></div>${tripsHtml}</section></div>
+      <div class="stack client-side-stack">
+        <section class="card section-card client-active-card"><div class="section-title"><div><p class="eyebrow">EN TIEMPO REAL</p><h2>Tu viaje actual</h2></div><button class="icon-button" aria-label="Actualizar viaje" data-action="refresh">↻</button></div>${activeHtml}</section>
+        <section class="card section-card client-history-card"><div class="section-title"><div><p class="eyebrow">TUS RECORRIDOS</p><h2>Actividad reciente</h2></div><span class="history-count">${trips.length} ${trips.length === 1 ? 'viaje' : 'viajes'}</span></div>${tripsHtml}</section>
+      </div>
     </div>`;
 }
 
@@ -541,6 +587,7 @@ async function handleClick(event) {
       const result = await request('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email, new_password }) });
       showToast(result.message || 'Contraseña restablecida.');
     } else if (action === 'refresh') await renderDashboard();
+    else if (action === 'focus-ride') document.querySelector('#origin_name')?.focus();
     else if (action === 'estimate-fare') {
       try { await estimateFare(); } catch (error) { showToast(error.message, true); }
     } else if (action === 'cancel-ride') await cancelRide(target.dataset.id);
