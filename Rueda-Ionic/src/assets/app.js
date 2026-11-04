@@ -9,6 +9,10 @@ let activeView = 'overview';
 let lastEstimate = null;
 let selectedRating = 5;
 let toastTimer;
+let clientMap = null;
+let mapMarkers = { origin: null, destination: null };
+let mapRoute = null;
+let selectedMapPoint = 'origin';
 
 function readStoredUser() {
   try { return JSON.parse(sessionStorage.getItem(STORAGE_KEYS.user) || 'null'); }
@@ -56,6 +60,145 @@ function saveDemoData(data) {
   sessionStorage.setItem(DEMO_DATA_KEY, JSON.stringify(data));
 }
 
+function destroyClientMap() {
+  if (clientMap) {
+    clientMap.remove();
+    clientMap = null;
+  }
+  mapMarkers = { origin: null, destination: null };
+  mapRoute = null;
+}
+
+function mapCoordinates(point) {
+  const prefix = point === 'origin' ? 'origin' : 'destination';
+  const latitudeValue = document.querySelector(`#${prefix}_latitude`)?.value;
+  const longitudeValue = document.querySelector(`#${prefix}_longitude`)?.value;
+  if (latitudeValue === '' || longitudeValue === '' || latitudeValue == null || longitudeValue == null) {
+    return null;
+  }
+  const latitude = Number(latitudeValue);
+  const longitude = Number(longitudeValue);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+    || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return null;
+  }
+  return [latitude, longitude];
+}
+
+function updateMapStatus(message) {
+  const status = document.querySelector('#map-status');
+  if (status) status.textContent = message;
+}
+
+function mapIcon(point) {
+  const shape = point === 'origin' ? 'origin' : 'destination';
+  return L.divIcon({
+    className: 'map-marker-wrapper',
+    html: `<span class="map-marker-pin map-marker-${shape}" aria-label="${shape === 'origin' ? 'Origen' : 'Destino'}"></span>`,
+    iconSize: [28, 36],
+    iconAnchor: [14, 33],
+  });
+}
+
+function syncMapMarker(point, coordinates, pan = false) {
+  if (!clientMap) return;
+  if (!coordinates) {
+    if (mapMarkers[point]) {
+      clientMap.removeLayer(mapMarkers[point]);
+      mapMarkers[point] = null;
+      const points = ['origin', 'destination']
+        .map((key) => mapMarkers[key]?.getLatLng())
+        .filter(Boolean);
+      if (mapRoute && points.length < 2) {
+        clientMap.removeLayer(mapRoute);
+        mapRoute = null;
+      }
+    }
+    return;
+  }
+  const marker = mapMarkers[point];
+  if (marker) {
+    marker.setLatLng(coordinates);
+  } else {
+    mapMarkers[point] = L.marker(coordinates, {
+      draggable: true,
+      icon: mapIcon(point),
+      title: point === 'origin' ? 'Punto de recogida' : 'Destino',
+      alt: point === 'origin' ? 'Punto de recogida' : 'Destino',
+    }).addTo(clientMap);
+    mapMarkers[point].on('dragend', (event) => {
+      const { lat, lng } = event.target.getLatLng();
+      applyMapPoint(point, lat, lng, false);
+    });
+  }
+
+  const points = ['origin', 'destination']
+    .map((key) => mapMarkers[key]?.getLatLng())
+    .filter(Boolean);
+  if (points.length === 2) {
+    if (mapRoute) mapRoute.setLatLngs(points);
+    else mapRoute = L.polyline(points, { color: '#455A64', weight: 4, opacity: 0.85, dashArray: '8 8' }).addTo(clientMap);
+    if (pan) clientMap.fitBounds(L.latLngBounds(points), { padding: [44, 44], maxZoom: 15 });
+  } else if (mapRoute) {
+    clientMap.removeLayer(mapRoute);
+    mapRoute = null;
+  }
+
+  if (pan && points.length === 1) clientMap.flyTo(coordinates, 15, { duration: 0.5 });
+}
+
+function applyMapPoint(point, latitude, longitude, pan = true) {
+  const lat = Number(latitude.toFixed(6));
+  const lng = Number(longitude.toFixed(6));
+  const prefix = point === 'origin' ? 'origin' : 'destination';
+  const latitudeInput = document.querySelector(`#${prefix}_latitude`);
+  const longitudeInput = document.querySelector(`#${prefix}_longitude`);
+  const nameInput = document.querySelector(`#${prefix}_name`);
+  if (!latitudeInput || !longitudeInput || !nameInput) return;
+  latitudeInput.value = String(lat);
+  longitudeInput.value = String(lng);
+  if (!nameInput.value.trim() || nameInput.dataset.mapLabel === 'true') {
+    nameInput.value = `Punto seleccionado (${lat}, ${lng})`;
+    nameInput.dataset.mapLabel = 'true';
+  }
+  syncMapMarker(point, [lat, lng], pan);
+  updateMapStatus(`${point === 'origin' ? 'Recogida' : 'Destino'} seleccionado: ${lat}, ${lng}. Puedes arrastrar el marcador para ajustarlo.`);
+}
+
+function initializeClientMap() {
+  const mapElement = document.querySelector('#client-map');
+  if (!mapElement || !window.L) {
+    updateMapStatus('No se pudo cargar el mapa. Revisa tu conexión a internet e inténtalo de nuevo.');
+    return;
+  }
+
+  destroyClientMap();
+  clientMap = L.map(mapElement, { zoomControl: false, scrollWheelZoom: false }).setView([4.6533, -74.0836], 12);
+  L.control.zoom({ position: 'bottomright' }).addTo(clientMap);
+  let tileErrorShown = false;
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+  }).on('tileerror', () => {
+    if (tileErrorShown) return;
+    tileErrorShown = true;
+    updateMapStatus('No se pudieron cargar algunos mosaicos del mapa. Verifica tu conexión a internet.');
+  }).addTo(clientMap);
+  clientMap.on('click', (event) => applyMapPoint(selectedMapPoint, event.latlng.lat, event.latlng.lng));
+
+  for (const point of ['origin', 'destination']) {
+    const coordinates = mapCoordinates(point);
+    if (coordinates) syncMapMarker(point, coordinates);
+  }
+  const existingPoints = ['origin', 'destination'].map((point) => mapCoordinates(point)).filter(Boolean);
+  if (existingPoints.length === 2) {
+    clientMap.fitBounds(L.latLngBounds(existingPoints), { padding: [44, 44], maxZoom: 15 });
+  } else if (existingPoints.length === 1) {
+    clientMap.setView(existingPoints[0], 15);
+  }
+  window.setTimeout(() => clientMap?.invalidateSize(), 50);
+}
+
 function demoEstimate(values) {
   const radians = (degrees) => degrees * Math.PI / 180;
   const lat1 = Number(values.origin_latitude);
@@ -93,6 +236,7 @@ function demoEstimate(values) {
     estimated_fare: Math.round(estimatedFare / 100) * 100,
     currency: 'COP',
     fare_breakdown: fareBreakdown,
+    demo: true,
   };
 }
 
@@ -386,6 +530,7 @@ function findActive(data) {
 }
 
 async function renderDashboard() {
+  destroyClientMap();
   updateTopbar();
   if (!sessionStorage.getItem(STORAGE_KEYS.token)) {
     sessionUser = null;
@@ -464,6 +609,17 @@ async function renderClient() {
     <div class="content-grid client-content-grid">
       <section id="ride-request" class="card section-card client-request-card">
         <div class="section-title client-section-title"><div><p class="eyebrow">EMPIEZA TU RECORRIDO</p><h2>Arma tu viaje</h2><p class="muted">Cuéntanos dónde te recogemos y a dónde vas.</p></div><span class="city-chip"><span aria-hidden="true">⌖</span> Bogotá</span></div>
+        <section class="map-picker" aria-label="Selecciona puntos en el mapa">
+          <div class="map-picker-toolbar">
+            <div class="map-point-switch" role="group" aria-label="Elige qué punto colocar en el mapa">
+              <button type="button" class="map-point-button selected" data-action="select-map-point" data-point="origin" aria-pressed="true"><span class="map-legend-dot origin-dot"></span>Recogida</button>
+              <button type="button" class="map-point-button" data-action="select-map-point" data-point="destination" aria-pressed="false"><span class="map-legend-dot destination-dot"></span>Destino</button>
+            </div>
+            <button type="button" class="map-location-button" data-action="locate-me"><span aria-hidden="true">◎</span> Mi ubicación</button>
+          </div>
+          <div id="client-map" class="client-map" role="application" aria-label="Mapa interactivo de Bogotá para elegir recogida y destino"></div>
+          <p id="map-status" class="map-status" role="status">Haz clic en el mapa para colocar primero el punto de recogida. Puedes arrastrar cada marcador.</p>
+        </section>
         <form id="ride-form" class="trip-form">
           <div class="location-fields client-location-fields">
             <span class="location-marker"></span>
@@ -483,10 +639,12 @@ async function renderClient() {
         <section class="card section-card client-history-card"><div class="section-title"><div><p class="eyebrow">TUS RECORRIDOS</p><h2>Actividad reciente</h2></div><span class="history-count">${trips.length} ${trips.length === 1 ? 'viaje' : 'viajes'}</span></div>${tripsHtml}</section>
       </div>
     </div>`;
+  window.setTimeout(initializeClientMap, 0);
 }
 
 function estimateMarkup(estimate) {
-  return `<div class="trip-result"><div><div class="inline-meta">${escapeHtml(estimate.distance_km)} km · ${escapeHtml(estimate.duration_min)} min aprox.</div><div class="field-hint">Estimación de la API · ${escapeHtml(estimate.currency || 'COP')}</div></div><div class="fare-value">${money(estimate.estimated_fare)}</div></div>`;
+  const source = estimate.demo ? 'Cálculo local · modo demo' : 'Estimación de la API';
+  return `<div class="trip-result"><div><div class="inline-meta">${escapeHtml(estimate.distance_km)} km · ${escapeHtml(estimate.duration_min)} min aprox.</div><div class="field-hint">${source} · ${escapeHtml(estimate.currency || 'COP')}</div></div><div class="fare-value">${money(estimate.estimated_fare)}</div></div>`;
 }
 
 async function renderDriver() {
@@ -756,6 +914,35 @@ async function handleClick(event) {
       await renderDashboard();
       showToast('Entraste a la demostración local del panel de cliente.');
     }
+    else if (action === 'select-map-point') {
+      selectedMapPoint = target.dataset.point === 'destination' ? 'destination' : 'origin';
+      document.querySelectorAll('.map-point-button').forEach((button) => {
+        const selected = button.dataset.point === selectedMapPoint;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      });
+      updateMapStatus(`Selecciona en el mapa el punto de ${selectedMapPoint === 'origin' ? 'recogida' : 'destino'}.`);
+    }
+    else if (action === 'locate-me') {
+      if (!navigator.geolocation) {
+        showToast('Tu navegador no permite consultar la ubicación.', true);
+        return;
+      }
+      target.disabled = true;
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          applyMapPoint(selectedMapPoint, coords.latitude, coords.longitude);
+          target.disabled = false;
+        },
+        (error) => {
+          target.disabled = false;
+          showToast(error.code === error.PERMISSION_DENIED
+            ? 'Permite el acceso a tu ubicación en el navegador para usar esta opción.'
+            : 'No se pudo obtener tu ubicación. Puedes seleccionar el punto en el mapa.', true);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+      );
+    }
     else if (action === 'logout') {
       try { await request('/auth/logout', { method: 'POST', body: JSON.stringify({}) }); }
       catch (error) { console.warn('La API no confirmó el cierre de sesión:', error.message); }
@@ -801,6 +988,16 @@ document.addEventListener('change', async (event) => {
     try { await renderDashboard(); } catch (error) { showToast(error.message, true); }
   } else if (event.target.matches('[data-action="driver-approval"]')) {
     try { await updateDriverApproval(event.target); } catch (error) { showToast(error.message, true); }
+  }
+});
+
+document.addEventListener('input', (event) => {
+  const field = event.target;
+  if (!(field instanceof HTMLInputElement)) return;
+  if (field.id === 'origin_latitude' || field.id === 'origin_longitude') {
+    syncMapMarker('origin', mapCoordinates('origin'));
+  } else if (field.id === 'destination_latitude' || field.id === 'destination_longitude') {
+    syncMapMarker('destination', mapCoordinates('destination'));
   }
 });
 

@@ -72,4 +72,5 @@ El JWT se conserva en `sessionStorage` durante la sesión de la pestaña. La dir
 - Los nombres y payloads enviados siguen los ejemplos de `API_DOCUMENTATION.md`.
 - La documentación no describe un endpoint para consultar el viaje activo del conductor. La interfaz intenta `GET /driver/active`; si el backend no lo implementa, las solicitudes y demás acciones siguen disponibles, pero el viaje en curso del conductor requiere que el profesor agregue/documente ese endpoint.
 - La documentación tampoco especifica la forma de la respuesta de reportes y auditoría; la interfaz admite las estructuras de lista habituales de Laravel y muestra una respuesta alternativa cuando el reporte no contiene campos tabulares conocidos.
-- No se incluye un mapa embebido ni geocodificación: el formulario permite indicar las coordenadas y ofrece enlaces a OpenStreetMap.
+- El panel de cliente incluye un mapa interactivo de OpenStreetMap: haz clic para colocar los puntos de recogida y destino, arrastra los marcadores para ajustarlos o usa la ubicación del dispositivo. El mapa requiere conexión a internet para cargar sus mosaicos; la ubicación del dispositivo solo se consulta cuando pulsas el botón y autorizas al navegador.
+- En el modo demo, el mapa y la selección de puntos funcionan sin el backend; las solicitudes y demás datos siguen siendo locales y ficticios.
