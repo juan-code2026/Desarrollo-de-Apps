@@ -1,3 +1,11 @@
+/*
+ * ============================================================================
+ *  RUEDA · ESTILOS GENERALES (inicio de sesión, cliente y conductor)
+ *  Paleta: #263238 (oscuro) · #455A64 (pizarra) · #B0BEC5 (claro) · #CFD8DC (fondo)
+ *  Los colores se definen como variables en :root (--slate, --slate-dark, ...).
+ *  Los estilos del administrador están en admin.css.
+ * ============================================================================
+ */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 :root {
@@ -26,7 +34,7 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; }
 .topbar { height: 74px; padding: 0 max(28px, calc((100vw - 1200px) / 2)); display: flex; align-items: center; justify-content: space-between; background: var(--paper); border-bottom: 1px solid var(--line); }
-.brand { display: inline-flex; gap: 10px; align-items: center; text-decoration: none; font: 700 23px 'Space Grotesk', sans-serif; letter-spacing: -1.3px; }
+.brand { color: #263238; display: inline-flex; gap: 10px; align-items: center; text-decoration: none; font: 700 23px 'Space Grotesk', sans-serif; letter-spacing: -1.3px; }
 .brand-mark { width: 31px; height: 31px; display: grid; place-items: center; background: var(--slate); color: #fff; border-radius: 50%; font-size: 23px; line-height: 1; }
 .brand-period { color: var(--slate); }
 .topbar-actions { display: flex; align-items: center; gap: 14px; }

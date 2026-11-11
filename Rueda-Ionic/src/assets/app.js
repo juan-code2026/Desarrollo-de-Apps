@@ -1,25 +1,70 @@
+/*
+ * ============================================================================
+ *  RUEDA · APLICACIÓN PRINCIPAL (cliente, conductor, sesión y arranque)
+ * ============================================================================
+ *  La interfaz es JavaScript plano: cada pantalla es una función que arma HTML
+ *  y lo pone dentro de #main-content (ver home.page.html). Los clics y
+ *  formularios se manejan con "delegación de eventos": un solo listener en
+ *  document que mira el atributo data-action del elemento tocado.
+ *
+ *  Archivos relacionados:
+ *    - admin.js   → panel de administrador (se carga antes que este).
+ *    - styles.css → estilos generales y del cliente.
+ *    - admin.css  → estilos del panel de administrador.
+ *
+ *  La API es la del profesor (Laravel + JWT). Ver API_DOCUMENTATION.md.
+ *  El token JWT se guarda en sessionStorage (se borra al cerrar la pestaña)
+ *  y la URL de la API en localStorage (se recuerda entre visitas).
+ * ============================================================================
+ */
+
+/* ---------- Configuración y estado global ---------- */
+
+// Nombres de las llaves usadas en sessionStorage / localStorage.
 const STORAGE_KEYS = { token: 'rueda_token', user: 'rueda_user', apiUrl: 'rueda_api_url' };
+// Token falso que identifica la demo del cliente (no es un JWT real).
 const DEMO_TOKEN = 'rueda-local-client-demo';
+// Llave de sessionStorage donde se guardan los datos ficticios del cliente.
 const DEMO_DATA_KEY = 'rueda_client_demo_data';
+// Servidor del profesor. Se puede cambiar en "Configuración de conexión".
 const DEFAULT_API_URL = 'http://20.20.1.22:8000/api';
+// IPs anteriores: si alguien las tenía guardadas, se cambian por la nueva.
 const PREVIOUS_DEFAULT_API_URLS = ['http://20.20.1.157:8000/api', 'http://20.20.1.52:8000/api'];
+// Contenedor donde se pinta cada pantalla.
 const app = document.querySelector('#main-content');
+// Zona derecha de la barra superior (botones de sesión).
 const topbarActions = document.querySelector('#topbar-actions');
+// Usuario con sesión iniciada (o null).
 let sessionUser = readStoredUser();
+// Pestaña activa del panel de administrador.
 let activeView = 'overview';
+// Última cotización de tarifa (se muestra al volver a pintar el formulario).
 let lastEstimate = null;
+// Estrellas elegidas en la ventana de calificación.
 let selectedRating = 5;
+// Temporizador para ocultar el aviso flotante (toast).
 let toastTimer;
+// Mapa Leaflet del formulario "Arma tu viaje".
 let clientMap = null;
+// Marcadores de recogida y destino en ese mapa.
 let mapMarkers = { origin: null, destination: null };
+// Línea punteada entre recogida y destino.
 let mapRoute = null;
+// Qué punto se coloca al hacer clic en el mapa: "origin" o "destination".
 let selectedMapPoint = 'origin';
+// Mapa en vivo del viaje activo.
 let activeRideMap = null;
+// Capas del mapa en vivo: marcadores, carro y ruta.
 let activeRideLayers = null;
+// Temporizador de la consulta periódica del viaje activo.
 let activeRidePoll = null;
+// Último estado conocido del viaje (para avisar cuando cambia).
 let activeRideStatus = null;
+// ¿El historial muestra todos los viajes o solo los 5 últimos?
 let showAllTrips = false;
+// Cada cuánto se consulta la ubicación del conductor (milisegundos).
 const ACTIVE_RIDE_POLL_MS = 10000;
+// Motivos rápidos que se ofrecen al cancelar un viaje.
 const CANCEL_REASONS = [
   'Cambio de planes',
   'El conductor tarda demasiado',
@@ -27,11 +72,15 @@ const CANCEL_REASONS = [
   'Encontré otro medio de transporte',
 ];
 
+/* ---------- Sesión y almacenamiento ---------- */
+
+// Lee el usuario guardado en la pestaña (o null si no hay o está dañado).
 function readStoredUser() {
   try { return JSON.parse(sessionStorage.getItem(STORAGE_KEYS.user) || 'null'); }
   catch { return null; }
 }
 
+// URL base de la API: la guardada por el usuario o la del profesor por defecto.
 function apiUrl() {
   const savedUrl = localStorage.getItem(STORAGE_KEYS.apiUrl);
   return (!savedUrl || PREVIOUS_DEFAULT_API_URLS.includes(savedUrl.replace(/\/+$/, ''))
@@ -39,10 +88,12 @@ function apiUrl() {
     : savedUrl).replace(/\/+$/, '');
 }
 
+// ¿La sesión actual es la demo del cliente?
 function isDemoClient() {
   return sessionStorage.getItem(STORAGE_KEYS.token) === DEMO_TOKEN;
 }
 
+// Datos ficticios de la demo del cliente (o los guardados en esta pestaña).
 function demoData() {
   try {
     const stored = JSON.parse(sessionStorage.getItem(DEMO_DATA_KEY) || 'null');
@@ -68,10 +119,14 @@ function demoData() {
   };
 }
 
+// Guarda los datos de la demo del cliente en esta pestaña.
 function saveDemoData(data) {
   sessionStorage.setItem(DEMO_DATA_KEY, JSON.stringify(data));
 }
 
+/* ---------- Mapa para elegir recogida y destino (Leaflet + OpenStreetMap) ---------- */
+
+// Libera los mapas y detiene la consulta en vivo antes de cambiar de pantalla.
 function destroyClientMap() {
   if (clientMap) {
     clientMap.remove();
@@ -83,6 +138,7 @@ function destroyClientMap() {
   stopActiveRidePolling();
 }
 
+// Elimina el mapa en vivo del viaje activo.
 function destroyActiveRideMap() {
   if (activeRideMap) {
     activeRideMap.remove();
@@ -91,6 +147,7 @@ function destroyActiveRideMap() {
   activeRideLayers = null;
 }
 
+// Detiene la consulta periódica del viaje activo.
 function stopActiveRidePolling() {
   if (activeRidePoll) {
     clearTimeout(activeRidePoll);
@@ -98,6 +155,7 @@ function stopActiveRidePolling() {
   }
 }
 
+// Lee [lat, lng] de los campos del formulario; null si no son válidos.
 function mapCoordinates(point) {
   const prefix = point === 'origin' ? 'origin' : 'destination';
   const latitudeValue = document.querySelector(`#${prefix}_latitude`)?.value;
@@ -114,11 +172,13 @@ function mapCoordinates(point) {
   return [latitude, longitude];
 }
 
+// Cambia el texto de ayuda que aparece debajo del mapa.
 function updateMapStatus(message) {
   const status = document.querySelector('#map-status');
   if (status) status.textContent = message;
 }
 
+// Ícono del marcador: gota para recogida, cuadro para destino.
 function mapIcon(point) {
   const shape = point === 'origin' ? 'origin' : 'destination';
   return L.divIcon({
@@ -129,6 +189,7 @@ function mapIcon(point) {
   });
 }
 
+// Pone, mueve o quita un marcador y redibuja la línea entre los dos puntos.
 function syncMapMarker(point, coordinates, pan = false) {
   if (!clientMap) return;
   if (!coordinates) {
@@ -176,6 +237,7 @@ function syncMapMarker(point, coordinates, pan = false) {
   if (pan && points.length === 1) clientMap.flyTo(coordinates, 15, { duration: 0.5 });
 }
 
+// Guarda un punto elegido en el mapa en los campos del formulario y mueve el marcador.
 function applyMapPoint(point, latitude, longitude, pan = true) {
   const lat = Number(latitude.toFixed(6));
   const lng = Number(longitude.toFixed(6));
@@ -197,14 +259,20 @@ function applyMapPoint(point, latitude, longitude, pan = true) {
 
 /* ---------- Autocompletado de direcciones (Photon / OpenStreetMap) ---------- */
 
+// Servicio de búsqueda de direcciones (Photon, basado en OpenStreetMap).
 const GEOCODER_URL = 'https://photon.komoot.io';
 // Zona de Bogotá y alrededores para priorizar resultados cercanos.
 const GEOCODER_BBOX = '-74.35,4.40,-73.95,4.90';
+// Temporizadores para esperar a que el usuario deje de escribir.
 const addressTimers = {};
+// Resultados de búsqueda mostrados en cada campo.
 const addressResults = {};
+// Opción resaltada con las flechas en cada campo.
 const addressActiveIndex = {};
+// Contador para ignorar respuestas viejas que llegan tarde.
 let addressRequestId = 0;
 
+// Campo de dirección con su lista de sugerencias.
 function addressField(point, label, placeholder) {
   const id = `${point}_name`;
   return `<div class="field autocomplete">
@@ -215,6 +283,7 @@ function addressField(point, label, placeholder) {
   </div>`;
 }
 
+// Título y detalle legibles de un resultado de Photon.
 function featureLabel(properties = {}) {
   const street = [properties.street, properties.housenumber].filter(Boolean).join(' # ');
   const title = properties.name || street || properties.locality || properties.district || properties.city || 'Lugar sin nombre';
@@ -226,11 +295,13 @@ function featureLabel(properties = {}) {
   return { title, detail: detail.join(', ') };
 }
 
+// Texto completo de un resultado para poner en el campo.
 function featureText(properties) {
   const { title, detail } = featureLabel(properties);
   return detail ? `${title}, ${detail}` : title;
 }
 
+// Busca direcciones cerca de Bogotá mientras el usuario escribe.
 async function searchAddresses(query) {
   const center = clientMap?.getCenter();
   const params = new URLSearchParams({
@@ -246,6 +317,7 @@ async function searchAddresses(query) {
   return (payload.features || []).filter((feature) => feature.geometry?.coordinates?.length === 2);
 }
 
+// Oculta la lista de sugerencias de un campo.
 function closeSuggestions(input) {
   const list = document.querySelector(`#${input.id}-list`);
   if (list) {
@@ -257,6 +329,7 @@ function closeSuggestions(input) {
   addressActiveIndex[input.id] = -1;
 }
 
+// Pinta la lista de sugerencias (o un mensaje si no hay).
 function renderSuggestions(input, features, message = '') {
   const list = document.querySelector(`#${input.id}-list`);
   if (!list) return;
@@ -277,6 +350,7 @@ function renderSuggestions(input, features, message = '') {
   input.setAttribute('aria-expanded', 'true');
 }
 
+// Resalta una sugerencia al moverse con las flechas del teclado.
 function highlightSuggestion(input, index) {
   const options = [...document.querySelectorAll(`#${input.id}-list .address-option`)];
   if (!options.length) return;
@@ -291,6 +365,7 @@ function highlightSuggestion(input, index) {
   input.setAttribute('aria-activedescendant', options[next].id);
 }
 
+// Usa la sugerencia elegida: llena el campo y coloca el marcador en el mapa.
 function chooseSuggestion(input, index) {
   const feature = addressResults[input.id]?.[index];
   if (!feature) return;
@@ -310,6 +385,7 @@ function chooseSuggestion(input, index) {
   }
 }
 
+// Al escribir en un campo de dirección, busca después de 300 ms sin teclear.
 function onAddressInput(input) {
   input.dataset.mapLabel = 'false';
   clearTimeout(addressTimers[input.id]);
@@ -336,6 +412,7 @@ function onAddressInput(input) {
   }, 300);
 }
 
+// Al hacer clic en el mapa, escribe la dirección real de ese punto.
 async function fillAddressFromMap(input, latitude, longitude) {
   try {
     const response = await fetch(`${GEOCODER_URL}/reverse?lat=${latitude}&lon=${longitude}&limit=1`);
@@ -348,6 +425,7 @@ async function fillAddressFromMap(input, latitude, longitude) {
   }
 }
 
+// Crea el mapa de "Arma tu viaje" (centrado en Bogotá) y su clic para elegir puntos.
 function initializeClientMap() {
   const mapElement = document.querySelector('#client-map');
   if (!mapElement || !window.L) {
@@ -382,6 +460,9 @@ function initializeClientMap() {
   window.setTimeout(() => clientMap?.invalidateSize(), 50);
 }
 
+/* ---------- Modo demo del cliente (datos ficticios, sin servidor) ---------- */
+
+// Cotización local de la demo con la fórmula de Haversine (igual que la API).
 function demoEstimate(values) {
   const radians = (degrees) => degrees * Math.PI / 180;
   const lat1 = Number(values.origin_latitude);
@@ -475,6 +556,7 @@ function advanceDemoRide(data) {
   saveDemoData(data);
 }
 
+// "Servidor" falso de la demo del cliente: responde como la API pero con datos locales.
 async function demoRequest(path, options = {}) {
   await new Promise((resolve) => setTimeout(resolve, 180));
   const method = (options.method || 'GET').toUpperCase();
@@ -570,12 +652,16 @@ async function demoRequest(path, options = {}) {
   throw new Error(`La acción ${method} ${path} no está disponible en la demostración local.`);
 }
 
+/* ---------- Utilidades: formato, avisos y llamadas a la API ---------- */
+
+// Escapa texto antes de meterlo en HTML (evita inyección de código).
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[char]));
 }
 
+// Formatea pesos colombianos: 6500 → "$ 6.500".
 function money(value) {
   const amount = Number(value);
   return Number.isFinite(amount) ? new Intl.NumberFormat('es-CO', {
@@ -583,6 +669,7 @@ function money(value) {
   }).format(amount) : '—';
 }
 
+// Formatea fechas ISO en español (fecha corta y hora).
 function dateTime(value) {
   if (!value) return 'Fecha no disponible';
   const date = new Date(value);
@@ -591,6 +678,7 @@ function dateTime(value) {
   }).format(date);
 }
 
+// Muestra un aviso flotante abajo; en rojo si isError es true.
 function showToast(message, isError = false) {
   const toast = document.querySelector('#toast');
   toast.textContent = message;
@@ -600,8 +688,12 @@ function showToast(message, isError = false) {
   toastTimer = setTimeout(() => toast.classList.remove('visible'), 3600);
 }
 
+// Llama a la API con el token JWT y devuelve el JSON. Si la respuesta es un error,
+// lanza un Error con el mensaje de la API (incluidos los errores de validación 422).
 async function request(path, options = {}) {
+  // En modo demo no se llama al servidor: se responden datos ficticios.
   if (isDemoClient()) return demoRequest(path, options);
+  if (isDemoAdmin()) return demoAdminRequest(path, options);
 
   const token = sessionStorage.getItem(STORAGE_KEYS.token);
   const headers = { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers };
@@ -623,10 +715,14 @@ async function request(path, options = {}) {
   return payload || {};
 }
 
+/* ---------- Componentes de interfaz reutilizables ---------- */
+
+// Muestra "Cargando..." mientras llega la información.
 function setLoading(message = 'Cargando información...') {
   app.innerHTML = `<div class="loading">${escapeHtml(message)}</div>`;
 }
 
+// Botones de la barra superior: iniciar sesión / crear cuenta, o nombre y cerrar sesión.
 function updateTopbar() {
   if (!sessionUser) {
     topbarActions.innerHTML = '<button class="link-button" data-action="show-login">Iniciar sesión</button><button class="btn btn-primary btn-small" data-action="show-register">Crear cuenta <span aria-hidden="true">↗</span></button>';
@@ -635,11 +731,13 @@ function updateTopbar() {
   topbarActions.innerHTML = `<span class="muted" style="font-size:12px">${escapeHtml(sessionUser.name || sessionUser.email || 'Usuario')}</span><button class="btn btn-outline btn-small" data-action="logout">Cerrar sesión</button>`;
 }
 
+// Genera el HTML de un campo de formulario con su etiqueta.
 function inputField(label, name, type = 'text', options = {}) {
   const attrs = `${options.required ? 'required' : ''} ${options.min !== undefined ? `min="${options.min}"` : ''} ${options.max !== undefined ? `max="${options.max}"` : ''} ${options.step ? `step="${options.step}"` : ''} ${options.placeholder ? `placeholder="${escapeHtml(options.placeholder)}"` : ''} autocomplete="${options.autocomplete || 'off'}"`;
   return `<div class="field"><label for="${escapeHtml(name)}">${escapeHtml(label)}</label><input id="${escapeHtml(name)}" name="${escapeHtml(name)}" type="${type}" ${attrs}></div>`;
 }
 
+// Pantalla de inicio de sesión o registro (mode = "login" o "register").
 function authPage(mode = 'login') {
   const registering = mode === 'register';
   app.innerHTML = `
@@ -672,7 +770,7 @@ function authPage(mode = 'login') {
           `}
           <button class="btn btn-primary full-width" type="submit" style="margin-top:5px">${registering ? 'Crear cuenta' : 'Iniciar sesión'} <span aria-hidden="true">→</span></button>
         </form>
-        ${!registering ? '<div class="demo-access"><p><strong>¿Servidor apagado?</strong> Puedes explorar el panel de cliente con información local de demostración.</p><button class="btn btn-outline full-width" type="button" data-action="demo-client">Entrar a la demo de cliente</button><span>Las solicitudes y cambios de esta demo no se envían a la API.</span></div>' : ''}
+        ${!registering ? '<div class="demo-access"><p><strong>¿Servidor apagado?</strong> Puedes explorar los paneles de cliente y administrador con información de demostración.</p><div class="demo-buttons"><button class="btn btn-outline" type="button" data-action="demo-client">Demo de cliente</button><button class="btn btn-outline" type="button" data-action="demo-admin">Demo de administrador</button></div><span>Las solicitudes y cambios de esta demo no se envían a la API.</span></div>' : ''}
         ${!registering ? '<button class="link-button" data-action="forgot-password" style="margin-top:13px;font-size:12px">¿Olvidaste tu contraseña?</button>' : ''}
         <details class="config">
           <summary>Configuración de conexión</summary>
@@ -686,6 +784,7 @@ function authPage(mode = 'login') {
     </section>`;
 }
 
+// Color del globito según el estado (verde, amarillo, rojo o azul).
 function statusClass(status) {
   const value = String(status || '').toLowerCase();
   if (['approved', 'completed', 'available', 'active', 'in_progress'].includes(value)) return 'status-green';
@@ -694,6 +793,7 @@ function statusClass(status) {
   return 'status-blue';
 }
 
+// Traducción de los estados que devuelve la API.
 const STATUS_LABELS = {
   requested: 'Buscando conductor', assigned: 'Conductor asignado', driver_arrived: 'Conductor llegó',
   in_progress: 'En curso', completed: 'Finalizado', cancelled: 'Cancelado',
@@ -701,26 +801,34 @@ const STATUS_LABELS = {
   available: 'En línea', unavailable: 'Desconectado',
 };
 
+// Globito con el estado traducido al español.
 function statusBadge(status) {
   return `<span class="status ${statusClass(status)}">${escapeHtml(STATUS_LABELS[status] || status || 'Sin estado')}</span>`;
 }
 
+// Encabezado de página con título, subtítulo y botones.
 function pageHeader(title, subtitle, actions = '') {
   return `<div class="dashboard-head"><div><p class="eyebrow">${escapeHtml(sessionUser?.role || 'Rueda')}</p><h1>${title}</h1><p class="muted">${subtitle}</p></div><div class="head-actions">${actions}</div></div>`;
 }
 
+// Mensaje para cuando una lista está vacía.
 function emptyState(message, icon = '↗') {
   return `<div class="empty-state"><div class="empty-icon">${icon}</div>${escapeHtml(message)}</div>`;
 }
 
+// Tarjeta pequeña con un número destacado.
 function statCard(label, value, detail = '') {
   return `<article class="card stat-card"><div class="stat-label">${escapeHtml(label)}</div><div class="stat-value">${escapeHtml(value ?? '—')}</div>${detail ? `<div class="stat-detail">${escapeHtml(detail)}</div>` : ''}</article>`;
 }
 
+// Muestra origen → destino con sus puntitos.
 function tripPath(origin, destination) {
   return `<div class="ride-line"><span class="dot"></span><span>${escapeHtml(origin || 'Origen no disponible')}</span></div><div class="ride-line destination"><span class="dot"></span><span>${escapeHtml(destination || 'Destino no disponible')}</span></div>`;
 }
 
+/* ---------- Inicio de sesión y registro ---------- */
+
+// POST /auth/login: guarda el token y el usuario, y abre su panel.
 async function login(form) {
   const data = Object.fromEntries(new FormData(form));
   const result = await request('/auth/login', { method: 'POST', body: JSON.stringify(data) });
@@ -734,6 +842,7 @@ async function login(form) {
   showToast(`Hola, ${sessionUser.name || 'bienvenido/a'}`);
 }
 
+// POST /auth/register: crea cliente o conductor (el conductor envía datos del vehículo).
 async function register(form) {
   const data = Object.fromEntries(new FormData(form));
   data.role = form.elements.role.value;
@@ -756,6 +865,7 @@ async function register(form) {
   }
 }
 
+// Saca una lista de la respuesta de la API, venga directa o paginada ({ data: [...] }).
 function extractArray(payload, ...keys) {
   for (const key of keys) {
     const value = payload?.[key];
@@ -765,11 +875,15 @@ function extractArray(payload, ...keys) {
   return [];
 }
 
+// Devuelve el viaje activo de /client/active, o null si no hay.
 function findActive(data) {
   if (data?.has_active && data.data) return data.data;
   return null;
 }
 
+/* ---------- Paneles por rol ---------- */
+
+// Pinta el panel según el rol del usuario (cliente, conductor o administrador).
 async function renderDashboard() {
   destroyClientMap();
   updateTopbar();
@@ -794,6 +908,7 @@ async function renderDashboard() {
   }
 }
 
+// PANEL DEL CLIENTE: tarifas, formulario con mapa, viaje en vivo e historial.
 async function renderClient() {
   const [activeResponse, tripsResponse, fareResponse] = await Promise.all([
     request('/client/active'), request('/client/trips'), request('/fares/active'),
@@ -875,8 +990,10 @@ async function renderClient() {
   }, 0);
 }
 
+// Últimos viajes cargados (para "Ver todos" y la ventana de calificación).
 let clientTripsCache = [];
 
+// HTML del historial de viajes del cliente.
 function tripsMarkup(trips) {
   clientTripsCache = trips;
   if (!trips.length) return emptyState('Tus viajes finalizados aparecerán aquí.', '◷');
@@ -897,12 +1014,14 @@ function tripsMarkup(trips) {
 
 /* ---------- Viaje activo en tiempo real (estilo navegación) ---------- */
 
+// Convierte latitud/longitud en [lat, lng]; null si no son válidas.
 function toPoint(latitude, longitude) {
   const lat = Number(latitude);
   const lng = Number(longitude);
   return Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) ? [lat, lng] : null;
 }
 
+// Puntos del viaje activo: recogida, destino y ubicación del conductor.
 function activeRidePoints(active) {
   const source = active?.request || active || {};
   const location = active?.driver?.latest_location;
@@ -913,6 +1032,7 @@ function activeRidePoints(active) {
   };
 }
 
+// Mensaje que acompaña cada estado del viaje activo.
 const RIDE_PHASE_TEXT = {
   requested: 'Estamos buscando un conductor cerca de ti…',
   assigned: 'Tu conductor va en camino al punto de recogida.',
@@ -920,6 +1040,7 @@ const RIDE_PHASE_TEXT = {
   in_progress: 'Vas camino a tu destino.',
 };
 
+// Tarjeta del viaje activo: mapa en vivo, conductor, vehículo, valor y cancelar.
 function activeRideMarkup(active) {
   if (!active) return emptyState('Cuando pidas un viaje, aquí podrás ver en vivo por dónde va tu conductor.', '↗');
   const points = activeRidePoints(active);
@@ -944,9 +1065,12 @@ function activeRideMarkup(active) {
     </article>`;
 }
 
+// ¿La cámara del mapa en vivo sigue al conductor?
 let followDriver = true;
+// Rutas ya calculadas con OSRM, para no pedirlas otra vez.
 const routeCache = new Map();
 
+// Ícono del carro del conductor, girado hacia donde va (bearing en grados).
 function carIcon(bearing = 0) {
   return L.divIcon({
     className: 'car-marker-wrapper',
@@ -956,6 +1080,7 @@ function carIcon(bearing = 0) {
   });
 }
 
+// Dirección (en grados) de un punto a otro, para girar el carro.
 function bearingBetween(from, to) {
   const radians = (degrees) => degrees * Math.PI / 180;
   const y = Math.sin(radians(to[1] - from[1])) * Math.cos(radians(to[0]));
@@ -965,6 +1090,7 @@ function bearingBetween(from, to) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360 - 90;
 }
 
+// Distancia en línea recta entre dos puntos (fórmula de Haversine).
 function straightDistanceKm(a, b) {
   const radians = (degrees) => degrees * Math.PI / 180;
   const h = Math.sin(radians(b[0] - a[0]) / 2) ** 2
@@ -999,6 +1125,7 @@ async function fetchRoadRoute(from, to) {
   }
 }
 
+// Actualiza el recuadro oscuro de arriba del mapa (tiempo y distancia).
 function setNavBanner(eta, detail) {
   const etaElement = document.querySelector('#nav-eta');
   const detailElement = document.querySelector('#nav-detail');
@@ -1006,6 +1133,7 @@ function setNavBanner(eta, detail) {
   if (detailElement) detailElement.textContent = detail;
 }
 
+// Mueve el carro suavemente de su posición anterior a la nueva.
 function animateMarker(marker, to, duration = 1200) {
   const from = marker.getLatLng();
   const start = performance.now();
@@ -1018,6 +1146,7 @@ function animateMarker(marker, to, duration = 1200) {
   requestAnimationFrame(frame);
 }
 
+// Dibuja o actualiza en el mapa en vivo los marcadores, el carro, la ruta y el tiempo estimado.
 async function drawActiveRide(active, firstDraw = false) {
   if (!activeRideMap || !activeRideLayers) return;
   const points = activeRidePoints(active);
@@ -1081,6 +1210,7 @@ async function drawActiveRide(active, firstDraw = false) {
   }
 }
 
+// Crea el mapa en vivo del viaje activo.
 function initActiveRideMap(active) {
   destroyActiveRideMap();
   const element = document.querySelector('#active-map');
@@ -1097,6 +1227,7 @@ function initActiveRideMap(active) {
   drawActiveRide(active, true);
 }
 
+// Activa o desactiva que la cámara siga al conductor.
 function setFollow(value) {
   followDriver = value;
   const button = document.querySelector('[data-action="toggle-follow"]');
@@ -1108,6 +1239,7 @@ function setFollow(value) {
   if (value && driver && activeRideMap) activeRideMap.setView(driver, Math.max(activeRideMap.getZoom(), 16), { animate: true });
 }
 
+// Empieza el seguimiento en vivo del viaje (mapa + consultas periódicas).
 function startActiveRideTracking(active) {
   stopActiveRidePolling();
   activeRideStatus = active?.status || null;
@@ -1117,11 +1249,13 @@ function startActiveRideTracking(active) {
   scheduleActiveRidePoll();
 }
 
+// Programa la próxima consulta de /client/active.
 function scheduleActiveRidePoll() {
   stopActiveRidePolling();
   activeRidePoll = setTimeout(pollActiveRide, isDemoClient() ? 3000 : ACTIVE_RIDE_POLL_MS);
 }
 
+// Consulta /client/active: mueve el carro, avisa los cambios de estado y detecta el fin del viaje.
 async function pollActiveRide() {
   activeRidePoll = null;
   if (!document.querySelector('#active-ride-slot') || sessionUser?.role !== 'client') return;
@@ -1152,6 +1286,7 @@ async function pollActiveRide() {
 
 /* ---------- Ventanas (cancelar y calificar) ---------- */
 
+// Abre una ventana emergente encima de la página.
 function openModal(content, labelledBy) {
   closeModal();
   const backdrop = document.createElement('div');
@@ -1163,10 +1298,12 @@ function openModal(content, labelledBy) {
   backdrop.querySelector('input, select, textarea, button:not([data-action="close-modal"])')?.focus();
 }
 
+// Cierra la ventana emergente.
 function closeModal() {
   document.querySelectorAll('.modal-backdrop').forEach((element) => element.remove());
 }
 
+// Ventana para cancelar el viaje eligiendo un motivo.
 function openCancelModal(id) {
   openModal(`
     <h2 id="modal-title">Cancelar viaje</h2>
@@ -1181,6 +1318,7 @@ function openCancelModal(id) {
     </form>`, 'modal-title');
 }
 
+// Ventana para calificar un viaje con estrellas, comentario e incidencia.
 function openRatingModal(id) {
   selectedRating = 5;
   const trip = clientTripsCache.find((item) => String(item.id) === String(id));
@@ -1198,8 +1336,10 @@ function openRatingModal(id) {
     </form>`, 'modal-title');
 }
 
+// Texto bajo las estrellas según la calificación (1 a 5).
 const RATING_CAPTIONS = ['', 'Muy malo', 'Malo', 'Regular', 'Bueno', 'Excelente'];
 
+// Resultado de la cotización con el detalle de la tarifa.
 function estimateMarkup(estimate) {
   const source = estimate.demo ? 'Cálculo local · modo demo' : 'Estimación de la API';
   const breakdown = estimate.fare_breakdown;
@@ -1214,6 +1354,9 @@ function estimateMarkup(estimate) {
   return `<div class="trip-result-wrap"><div class="trip-result"><div><div class="inline-meta">${escapeHtml(estimate.distance_km)} km · ${escapeHtml(estimate.duration_min)} min aprox.</div><div class="field-hint">${source} · ${escapeHtml(estimate.currency || 'COP')}</div></div><div class="fare-value">${money(estimate.estimated_fare)}</div></div>${breakdownHtml}</div>`;
 }
 
+/* ---------- Panel del conductor ---------- */
+
+// PANEL DEL CONDUCTOR: disponibilidad, solicitudes cercanas y viaje en curso.
 async function renderDriver() {
   const [requestsResponse, activeResponse] = await Promise.all([
     request('/driver/ride-requests'),
@@ -1235,6 +1378,7 @@ async function renderDriver() {
   await loadDriverCurrentTrip();
 }
 
+// Carga el viaje en curso del conductor (GET /driver/active, si el backend lo tiene).
 async function loadDriverCurrentTrip() {
   try {
     const [clientActive, me] = await Promise.all([request('/driver/active').catch((error) => {
@@ -1257,84 +1401,9 @@ async function loadDriverCurrentTrip() {
   }
 }
 
-function adminTabs() {
-  const tabs = [['overview', 'Resumen'], ['drivers', 'Conductores'], ['fares', 'Tarifas'], ['trips', 'Viajes'], ['reports', 'Reportes'], ['audit', 'Auditoría']];
-  return `<nav class="subnav">${tabs.map(([key, label]) => `<button class="nav-chip ${activeView === key ? 'active' : ''}" data-action="admin-view" data-view="${key}">${label}</button>`).join('')}</nav>`;
-}
+/* ---------- Acciones que llaman a la API ---------- */
 
-async function renderAdmin() {
-  const title = activeView === 'drivers' ? 'Conductores' : activeView === 'fares' ? 'Tarifas' : activeView === 'trips' ? 'Viajes' : activeView === 'reports' ? 'Reportes' : activeView === 'audit' ? 'Auditoría' : 'Resumen general';
-  let content = '';
-  if (activeView === 'drivers') content = await adminDrivers();
-  else if (activeView === 'fares') content = await adminFares();
-  else if (activeView === 'trips') content = await adminTrips();
-  else if (activeView === 'reports') content = await adminReports();
-  else if (activeView === 'audit') content = await adminAudit();
-  else content = await adminOverview();
-  app.innerHTML = `${pageHeader(title, 'Monitorea y administra la operación de Rueda.', '<button class="btn btn-outline btn-small" data-action="refresh">Actualizar</button>')}${adminTabs()}${content}`;
-}
-
-async function adminOverview() {
-  const response = await request('/admin/dashboard');
-  const stats = response.stats || {};
-  const trips = extractArray({ trips: response.recent_trips }, 'trips');
-  const incidents = Array.isArray(response.recent_incidents) ? response.recent_incidents : [];
-  return `<div class="stat-grid">${statCard('Clientes', stats.total_clients)}${statCard('Conductores', stats.total_drivers, `${stats.pending_drivers ?? 0} por aprobar`)}${statCard('Viajes activos', stats.active_trips, `${stats.pending_requests ?? 0} solicitudes pendientes`)}${statCard('Ingresos registrados', money(stats.total_revenue), `${stats.completed_trips ?? 0} viajes completados`)}</div>
-    <div class="content-grid"><section class="card section-card"><div class="section-title"><h2>Viajes recientes</h2></div>${trips.length ? trips.slice(0, 8).map((trip) => `<article class="record"><div><h3>Viaje #${escapeHtml(trip.id)}</h3><p>${escapeHtml(trip.client?.user?.name || trip.client?.name || 'Cliente')} → ${escapeHtml(trip.driver?.user?.name || trip.driver?.name || 'Conductor')}</p><p>${dateTime(trip.completed_at || trip.created_at)}</p></div><div class="record-right">${statusBadge(trip.status)}<p class="inline-meta" style="margin-top:8px">${money(trip.final_fare || trip.estimated_fare)}</p></div></article>`).join('') : emptyState('No hay viajes recientes para mostrar.')}</section>
-    <section class="card section-card"><div class="section-title"><h2>Incidencias recientes</h2></div>${incidents.length ? incidents.slice(0, 8).map((incident) => `<article class="record"><div><h3>Incidencia #${escapeHtml(incident.id)}</h3><p>${escapeHtml(incident.description || incident.comment || incident.type || 'Sin descripción')}</p><p>${dateTime(incident.created_at)}</p></div></article>`).join('') : emptyState('No hay incidencias recientes.', '!')}</section></div>`;
-}
-
-async function adminDrivers() {
-  const filter = document.querySelector('#driver-filter')?.value || '';
-  const query = filter ? `?approval_status=${encodeURIComponent(filter)}` : '';
-  const response = await request(`/admin/drivers${query}`);
-  const drivers = extractArray(response, 'drivers');
-  return `<section class="card section-card"><div class="section-title"><h2>Revisión de conductores</h2><select id="driver-filter" aria-label="Filtrar por estado" data-action="filter-drivers"><option value="">Todos los estados</option><option value="pending" ${filter === 'pending' ? 'selected' : ''}>Pendientes</option><option value="approved" ${filter === 'approved' ? 'selected' : ''}>Aprobados</option><option value="rejected" ${filter === 'rejected' ? 'selected' : ''}>Rechazados</option><option value="suspended" ${filter === 'suspended' ? 'selected' : ''}>Suspendidos</option></select></div>
-    ${drivers.length ? `<div class="table-wrap"><table><thead><tr><th>Conductor</th><th>Vehículo</th><th>Calificación</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${drivers.map((driver) => { const vehicle = driver.vehicles?.[0] || {}; return `<tr><td><div class="table-name">${escapeHtml(driver.user?.name || 'Conductor')}</div><div class="table-sub">${escapeHtml(driver.user?.email || '')} · ${escapeHtml(driver.license_number || 'Sin licencia')}</div></td><td>${escapeHtml([vehicle.brand, vehicle.model, vehicle.plate].filter(Boolean).join(' · ') || 'Sin vehículo')}</td><td>★ ${escapeHtml(driver.rating_average ?? '—')}</td><td>${statusBadge(driver.approval_status)}</td><td><select class="inline-input" data-action="driver-approval" data-id="${escapeHtml(driver.id)}" aria-label="Cambiar aprobación de ${escapeHtml(driver.user?.name || 'conductor')}" style="width:auto;min-height:33px;padding:4px"><option value="">Cambiar…</option><option value="approved">Aprobar</option><option value="rejected">Rechazar</option><option value="suspended">Suspender</option></select></td></tr>`; }).join('')}</tbody></table></div>` : emptyState('No hay conductores en este filtro.')}</section>`;
-}
-
-async function adminFares() {
-  const response = await request('/admin/fares');
-  const fares = extractArray(response, 'fares');
-  return `<div class="content-grid"><section class="card section-card"><div class="section-title"><h2>Tarifas configuradas</h2></div>${fares.length ? fares.map((fare) => `<article class="record"><div><h3>${escapeHtml(fare.name || 'Tarifa')}</h3><p>Base ${money(fare.base_fare)} · ${money(fare.price_per_km)}/km · ${money(fare.price_per_minute)}/min</p><p>Mínimo ${money(fare.minimum_fare)} · multiplicador ×${escapeHtml(fare.surge_multiplier)}</p></div><div class="record-right">${statusBadge(fare.active ? 'active' : 'unavailable')}</div></article>`).join('') : emptyState('Aún no hay tarifas configuradas.')}</section>
-    <section class="card section-card"><div class="section-title"><h2>Crear tarifa</h2></div><form id="fare-form">
-      ${inputField('Nombre de la tarifa', 'name', 'text', { required: true, placeholder: 'Tarifa urbana estándar' })}
-      <div class="form-row">${inputField('Tarifa base (COP)', 'base_fare', 'number', { required: true, min: 0 })}${inputField('Precio por km (COP)', 'price_per_km', 'number', { required: true, min: 0 })}</div>
-      <div class="form-row">${inputField('Precio por minuto (COP)', 'price_per_minute', 'number', { required: true, min: 0 })}${inputField('Tarifa mínima (COP)', 'minimum_fare', 'number', { required: true, min: 0 })}</div>
-      <div class="form-row">${inputField('Multiplicador dinámico', 'surge_multiplier', 'number', { required: true, min: 0, step: '0.1' })}<div class="field"><label for="active">Estado</label><select id="active" name="active"><option value="true">Activa</option><option value="false">Inactiva</option></select></div></div>
-      <button class="btn btn-primary" type="submit">Guardar tarifa</button>
-    </form></section></div>`;
-}
-
-async function adminTrips() {
-  const params = new URLSearchParams();
-  const status = document.querySelector('#trip-status')?.value;
-  const client = document.querySelector('#trip-client')?.value;
-  const driver = document.querySelector('#trip-driver')?.value;
-  const date = document.querySelector('#trip-date')?.value;
-  if (status) params.set('status', status);
-  if (client) params.set('client_id', client);
-  if (driver) params.set('driver_id', driver);
-  if (date) params.set('date', date);
-  const response = await request(`/admin/trips${params.size ? `?${params}` : ''}`);
-  const trips = extractArray(response, 'trips');
-  return `<section class="card section-card"><div class="section-title"><h2>Registro de viajes</h2></div><form id="trip-filters" class="filters"><select id="trip-status"><option value="">Todos los estados</option>${['requested','assigned','driver_arrived','in_progress','completed','cancelled'].map((value) => `<option value="${value}" ${status === value ? 'selected' : ''}>${STATUS_LABELS[value]}</option>`).join('')}</select><input id="trip-client" type="number" min="1" value="${escapeHtml(client || '')}" placeholder="ID cliente"><input id="trip-driver" type="number" min="1" value="${escapeHtml(driver || '')}" placeholder="ID conductor"><input id="trip-date" type="date" value="${escapeHtml(date || '')}"><button class="btn btn-outline btn-small" type="submit">Filtrar</button></form>
-    ${trips.length ? `<div class="table-wrap"><table><thead><tr><th>Viaje</th><th>Cliente / Conductor</th><th>Fecha</th><th>Estado</th><th>Valor</th></tr></thead><tbody>${trips.map((trip) => `<tr><td><div class="table-name">#${escapeHtml(trip.id)}</div><div class="table-sub">${escapeHtml(trip.origin_name || trip.request?.origin_name || '—')} → ${escapeHtml(trip.destination_name || trip.request?.destination_name || '—')}</div></td><td>${escapeHtml(trip.client?.user?.name || trip.client?.name || '—')}<div class="table-sub">${escapeHtml(trip.driver?.user?.name || trip.driver?.name || 'Sin conductor')}</div></td><td>${dateTime(trip.created_at || trip.completed_at)}</td><td>${statusBadge(trip.status)}</td><td>${money(trip.final_fare || trip.estimated_fare)}</td></tr>`).join('')}</tbody></table></div>` : emptyState('No hay viajes que coincidan con los filtros.')}</section>`;
-}
-
-async function adminReports() {
-  const response = await request('/admin/reports');
-  const report = response.report || response.stats || response;
-  const entries = Object.entries(report).filter(([, value]) => typeof value !== 'object');
-  return `<section class="card section-card"><div class="section-title"><h2>Reporte consolidado</h2></div>${entries.length ? `<div class="stat-grid">${entries.map(([key, value]) => statCard(key.replaceAll('_', ' '), typeof value === 'number' && /revenue|income|fare|total/i.test(key) ? money(value) : value)).join('')}</div>` : `<pre class="field-hint" style="white-space:pre-wrap">${escapeHtml(JSON.stringify(response, null, 2))}</pre>`}</section>`;
-}
-
-async function adminAudit() {
-  const response = await request('/admin/audit-logs');
-  const logs = extractArray(response, 'audit_logs', 'logs', 'data');
-  return `<section class="card section-card"><div class="section-title"><h2>Registro de auditoría</h2></div>${logs.length ? `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead><tbody>${logs.map((log) => `<tr><td>${dateTime(log.created_at || log.timestamp)}</td><td>${escapeHtml(log.user?.name || log.user_name || '—')}</td><td>${escapeHtml(log.action || log.event || '—')}</td><td>${escapeHtml(log.description || log.details || log.ip_address || '—')}</td></tr>`).join('')}</tbody></table></div>` : emptyState('No hay acciones de auditoría para mostrar.', '◷')}</section>`;
-}
-
+// Borra el token y el usuario de la pestaña.
 function clearSession() {
   sessionStorage.removeItem(STORAGE_KEYS.token);
   sessionStorage.removeItem(STORAGE_KEYS.user);
@@ -1343,10 +1412,12 @@ function clearSession() {
   updateTopbar();
 }
 
+// Convierte un formulario en un objeto { campo: valor }.
 function getFormData(form) {
   return Object.fromEntries(new FormData(form));
 }
 
+// POST /client/estimate-fare con las coordenadas del formulario.
 async function estimateFare() {
   const form = document.querySelector('#ride-form');
   if (!form.reportValidity()) return;
@@ -1360,6 +1431,7 @@ async function estimateFare() {
   if (target) target.innerHTML = estimateMarkup(lastEstimate);
 }
 
+// POST /client/ride-requests: pide el viaje.
 async function requestRide(form) {
   if (!form.reportValidity()) return;
   const values = getFormData(form);
@@ -1370,6 +1442,7 @@ async function requestRide(form) {
   await renderDashboard();
 }
 
+// POST /client/cancel/{id} con el motivo elegido en la ventana.
 async function cancelRide(form) {
   const values = getFormData(form);
   const reason = values.reason === 'other' ? (values.other_reason || '').trim() : values.reason;
@@ -1389,6 +1462,7 @@ async function cancelRide(form) {
   }
 }
 
+// POST /client/trips/{id}/rating con estrellas, comentario e incidencia.
 async function submitRating(form) {
   const values = getFormData(form);
   const button = form.querySelector('[type="submit"]');
@@ -1406,6 +1480,7 @@ async function submitRating(form) {
   }
 }
 
+// Acciones del conductor: aceptar solicitud, "ya llegué", iniciar y finalizar viaje.
 async function driverAction(action, id) {
   if (action === 'accept-ride') {
     const result = await request(`/driver/ride-requests/${encodeURIComponent(id)}/accept`, { method: 'POST', body: JSON.stringify({}) });
@@ -1428,25 +1503,9 @@ async function driverAction(action, id) {
   await renderDashboard();
 }
 
-async function saveFare(form) {
-  const data = getFormData(form);
-  for (const field of ['base_fare', 'price_per_km', 'price_per_minute', 'minimum_fare', 'surge_multiplier']) data[field] = Number(data[field]);
-  data.active = data.active === 'true';
-  const result = await request('/admin/fares', { method: 'POST', body: JSON.stringify(data) });
-  showToast(result.message || 'Tarifa creada correctamente.');
-  await renderDashboard();
-}
+/* ---------- Manejo de eventos (delegación) ---------- */
 
-async function updateDriverApproval(select) {
-  if (!select.value) return;
-  const admin_notes = window.prompt('Notas para el registro (opcional):') || '';
-  const result = await request(`/admin/drivers/${encodeURIComponent(select.dataset.id)}/approval`, {
-    method: 'PATCH', body: JSON.stringify({ approval_status: select.value, admin_notes }),
-  });
-  showToast(result.message || 'Estado del conductor actualizado.');
-  await renderDashboard();
-}
-
+// Maneja el envío de todos los formularios de la app según su id.
 async function handleSubmit(event) {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
@@ -1474,15 +1533,10 @@ async function handleSubmit(event) {
   } else if (form.id === 'rating-form') {
     event.preventDefault();
     try { await submitRating(form); } catch (error) { showToast(error.message, true); }
-  } else if (form.id === 'fare-form') {
-    event.preventDefault();
-    try { await saveFare(form); } catch (error) { showToast(error.message, true); }
-  } else if (form.id === 'trip-filters') {
-    event.preventDefault();
-    try { await renderDashboard(); } catch (error) { showToast(error.message, true); }
   }
 }
 
+// Maneja todos los clics de la app según el atributo data-action del botón.
 async function handleClick(event) {
   const target = event.target.closest('[data-action]');
   if (!target) return;
@@ -1505,6 +1559,7 @@ async function handleClick(event) {
       await renderDashboard();
       showToast('Entraste a la demostración local del panel de cliente.');
     }
+    else if (action === 'demo-admin') await startAdminDemo();
     else if (action === 'select-map-point') {
       selectedMapPoint = target.dataset.point === 'destination' ? 'destination' : 'origin';
       document.querySelectorAll('.map-point-button').forEach((button) => {
@@ -1568,9 +1623,6 @@ async function handleClick(event) {
       sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(sessionUser));
       showToast(result.message || 'Disponibilidad actualizada.');
       await renderDashboard();
-    } else if (action === 'admin-view') {
-      activeView = target.dataset.view;
-      await renderDashboard();
     }
   } catch (error) { showToast(error.message, true); }
 }
@@ -1589,10 +1641,6 @@ document.addEventListener('change', async (event) => {
     other.hidden = !isOther;
     other.querySelector('textarea').required = isOther;
     if (isOther) other.querySelector('textarea').focus();
-  } else if (event.target.id === 'driver-filter') {
-    try { await renderDashboard(); } catch (error) { showToast(error.message, true); }
-  } else if (event.target.matches('[data-action="driver-approval"]')) {
-    try { await updateDriverApproval(event.target); } catch (error) { showToast(error.message, true); }
   }
 });
 
@@ -1654,6 +1702,9 @@ document.addEventListener('focusout', (event) => {
   }
 });
 
+/* ---------- Arranque de la aplicación ---------- */
+
+// Arranque: si hay sesión guardada la recupera con /auth/me; si no, muestra el inicio de sesión.
 async function init() {
   if (!sessionStorage.getItem(STORAGE_KEYS.token)) {
     sessionUser = null;
@@ -1662,7 +1713,7 @@ async function init() {
     return;
   }
   updateTopbar();
-  if (isDemoClient()) {
+  if (isDemoClient() || isDemoAdmin()) {
     sessionUser = readStoredUser();
     await renderDashboard();
     return;

@@ -58,6 +58,22 @@ git push -u origin feat/descripcion-del-cambio
 
 Después, abran un pull request hacia `feat/rueda-ionic-frontend`.
 
+### Probar el panel de administrador sin el servidor
+
+En la pantalla de inicio de sesión, pulsa **Demo de administrador**. Verás el resumen con KPIs y gráficas, la revisión de conductores (aprobar, rechazar y suspender), las tarifas con vista previa del precio, los viajes con filtros, los reportes y la auditoría, todo con datos ficticios.
+
+## Estructura del código
+
+| Archivo | Qué contiene |
+|---|---|
+| `src/assets/app.js` | Sesión, inicio de sesión/registro, panel de cliente (mapa, viaje en vivo, autocompletado) y panel de conductor. |
+| `src/assets/admin.js` | Todo el panel de administrador y su modo demo. Se carga antes que `app.js`. |
+| `src/assets/styles.css` | Estilos generales y del cliente. |
+| `src/assets/admin.css` | Estilos del panel de administrador. |
+| `src/app/home/home.page.ts` | Carga los scripts en orden. |
+
+El código está comentado en español: cada sección y cada función tiene una explicación de lo que hace.
+
 ## Funcionalidades conectadas
 
 - **Todos:** inicio de sesión, registro y cierre de sesión. El registro permite crear clientes o conductores; no se permite el autorregistro de administradores.

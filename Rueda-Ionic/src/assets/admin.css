@@ -1,0 +1,210 @@
+/*
+ * ============================================================================
+ *  RUEDA · ESTILOS DEL PANEL DE ADMINISTRADOR
+ *  Paleta: #263238 (oscuro) · #455A64 (pizarra) · #B0BEC5 (claro) · #CFD8DC (fondo)
+ *  Las variables --slate, --slate-dark, --slate-light y --line vienen de styles.css.
+ * ============================================================================
+ */
+
+/* ---------- Botones de demo en la pantalla de inicio ---------- */
+.demo-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* ---------- Encabezado oscuro con pestañas ---------- */
+.admin-hero { position: relative; overflow: hidden; margin-bottom: 20px; padding: 28px clamp(20px, 4vw, 36px) 0; border-radius: 18px; background: linear-gradient(120deg, #263238 0%, #455A64 100%); color: #fff; }
+/* Círculos decorativos de fondo */
+.admin-hero::before, .admin-hero::after { position: absolute; content: ''; border: 1px solid #CFD8DC1f; border-radius: 50%; pointer-events: none; }
+.admin-hero::before { width: 340px; height: 340px; right: -90px; top: -170px; }
+.admin-hero::after { width: 200px; height: 200px; right: 160px; top: -130px; }
+.admin-hero-top { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.admin-kicker { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; color: #B0BEC5; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.admin-kicker span { width: 7px; height: 7px; border-radius: 50%; background: #B0BEC5; box-shadow: 0 0 0 5px #B0BEC51f; }
+.admin-hero h1 { margin: 0 0 6px; color: #fff; font-size: clamp(30px, 4vw, 42px); }
+.admin-date { margin: 0; color: #CFD8DC; font-size: 13px; }
+.admin-date::first-letter { text-transform: uppercase; }
+.admin-refresh { flex: 0 0 auto; border-color: #CFD8DC40; background: #ffffff14; color: #fff; }
+.admin-refresh:hover { background: #ffffff26; }
+
+.admin-tabs { position: relative; z-index: 1; display: flex; gap: 4px; margin-top: 24px; overflow-x: auto; scrollbar-width: none; }
+.admin-tabs::-webkit-scrollbar { display: none; }
+.admin-tab { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 12px 15px 14px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: #B0BEC5; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.admin-tab span { font-size: 13px; opacity: .8; }
+.admin-tab:hover { background: #ffffff12; color: #fff; }
+/* La pestaña activa "se une" con el fondo de la página */
+.admin-tab.active { background: var(--canvas); color: #263238; }
+.tab-badge { display: grid; min-width: 19px; height: 19px; padding: 0 5px; place-items: center; border-radius: 10px; background: #B0BEC5; color: #263238; font-size: 10px; }
+.admin-tab.active .tab-badge { background: #263238; color: #fff; }
+
+/* ---------- Tarjetas y estructura general ---------- */
+.admin-body { display: grid; gap: 16px; }
+.admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.admin-grid-fares { grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); }
+.admin-card { padding: clamp(17px, 2.5vw, 23px); border-color: #B0BEC5; border-radius: 14px; box-shadow: 0 5px 18px #2632380a; }
+.admin-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+.admin-card-head .eyebrow { margin-bottom: 5px; color: var(--slate); }
+.admin-card-head h2 { margin: 0; color: #263238; font-size: 21px; }
+.admin-card-head .muted { margin: 6px 0 0; font-size: 12px; }
+.admin-chip { flex: 0 0 auto; padding: 6px 10px; border-radius: 20px; background: #CFD8DC80; color: var(--slate); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.admin-chip.chip-alert { background: #263238; color: #fff; }
+
+/* ---------- KPIs ---------- */
+.admin-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.admin-kpi { display: flex; align-items: flex-start; gap: 13px; min-width: 0; padding: 17px; border: 1px solid #B0BEC5; border-radius: 14px; background: #fff; box-shadow: 0 4px 14px #26323808; }
+.admin-kpi-icon { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 11px; background: #CFD8DC; color: #263238; font-size: 18px; font-weight: 700; }
+.admin-kpi div { display: grid; gap: 3px; min-width: 0; }
+.admin-kpi-label { color: var(--slate); font-size: 11px; font-weight: 600; }
+.admin-kpi-value { overflow: hidden; color: #263238; font: 600 25px 'Space Grotesk', sans-serif; letter-spacing: -.04em; text-overflow: ellipsis; white-space: nowrap; }
+.admin-kpi-detail { color: var(--slate); font-size: 11px; }
+/* Primer KPI (ingresos) destacado en oscuro */
+.admin-kpi.kpi-dark { border-color: #263238; background: #263238; }
+.kpi-dark .admin-kpi-icon { background: #455A64; color: #CFD8DC; }
+.kpi-dark .admin-kpi-label, .kpi-dark .admin-kpi-detail { color: #B0BEC5; }
+.kpi-dark .admin-kpi-value { color: #fff; }
+
+/* ---------- Aviso de conductores pendientes ---------- */
+.admin-alert { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 17px; border: 1px solid #455A64; border-radius: 13px; background: #fff; color: #263238; text-align: left; transition: transform .15s, box-shadow .15s; }
+.admin-alert:hover { transform: translateY(-1px); box-shadow: 0 8px 20px #2632381a; }
+.admin-alert > span { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #263238; color: #fff; font-weight: 700; }
+.admin-alert div { display: grid; flex: 1; gap: 2px; }
+.admin-alert strong { font-size: 14px; }
+.admin-alert small { color: var(--slate); font-size: 12px; }
+.admin-alert > b { color: var(--slate); font-size: 18px; }
+
+/* ---------- Gráficas (barra apilada y anillo) ---------- */
+.stacked-bar { display: flex; height: 16px; overflow: hidden; border-radius: 10px; background: #CFD8DC; }
+.stacked-bar span { height: 100%; transition: width .4s; }
+.stacked-bar span + span { border-left: 2px solid #fff; }
+.seg-completed { background: #263238; }
+.seg-active { background: #455A64; }
+.seg-pending { background: #B0BEC5; }
+.seg-cancelled { background: repeating-linear-gradient(45deg, #CFD8DC 0 4px, #B0BEC5 4px 8px); }
+.seg-other { background: #CFD8DC; border: 1px solid #B0BEC5; }
+.bar-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: 18px 0 0; padding: 0; list-style: none; }
+.bar-legend li { display: flex; align-items: center; gap: 8px; color: var(--slate); font-size: 12px; }
+.bar-legend b { margin-left: auto; color: #263238; font: 600 15px 'Space Grotesk', sans-serif; }
+.bar-legend small { min-width: 34px; color: var(--slate); font-size: 10px; text-align: right; }
+.legend-dot { width: 11px; height: 11px; flex: 0 0 auto; border-radius: 3px; }
+.donut-wrap { display: flex; align-items: center; gap: 26px; }
+.donut { position: relative; display: grid; width: 140px; height: 140px; flex: 0 0 auto; place-items: center; border-radius: 50%; }
+.donut > div { display: grid; width: 96px; height: 96px; place-items: center; align-content: center; border-radius: 50%; background: #fff; }
+.donut strong { color: #263238; font: 600 28px 'Space Grotesk', sans-serif; line-height: 1; }
+.donut span { color: var(--slate); font-size: 10px; }
+.donut-legend { flex: 1; grid-template-columns: 1fr; margin: 0; }
+
+/* ---------- Filas de listas (viajes e incidencias) ---------- */
+.admin-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #CFD8DC; }
+.admin-row:first-of-type { border-top: 0; padding-top: 0; }
+.admin-avatar { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #CFD8DC; color: #263238; font-size: 12px; font-weight: 700; }
+.admin-avatar.avatar-large { width: 44px; height: 44px; font-size: 14px; }
+.admin-avatar.avatar-alert { background: #263238; color: #fff; }
+.admin-row-main { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.admin-row-main strong { color: #263238; font-size: 13px; }
+.admin-row-main span { overflow: hidden; color: var(--slate); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-row-main small { color: #455A64aa; font-size: 11px; }
+.admin-row-side { display: grid; justify-items: end; gap: 6px; }
+.admin-row-side b { color: #263238; font: 600 14px 'Space Grotesk', sans-serif; }
+
+/* ---------- Conductores ---------- */
+.admin-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.filter-chip { padding: 8px 13px; border: 1px solid #B0BEC5; border-radius: 30px; background: #fff; color: var(--slate); font-size: 12px; font-weight: 600; }
+.filter-chip:hover { background: #CFD8DC66; }
+.filter-chip.active { border-color: #263238; background: #263238; color: #fff; }
+.admin-search { display: flex; align-items: center; gap: 8px; min-width: min(280px, 100%); padding: 0 12px; border: 1px solid #B0BEC5; border-radius: 9px; background: #fff; }
+.admin-search:focus-within { border-color: #455A64; box-shadow: 0 0 0 3px #B0BEC580; }
+.admin-search span { color: var(--slate); font-size: 16px; }
+.admin-search input { width: 100%; min-height: 40px; border: 0; outline: none; background: transparent; color: #263238; font-size: 13px; }
+.driver-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+.driver-card { display: grid; gap: 14px; padding: 16px; border: 1px solid #CFD8DC; border-radius: 12px; background: #fff; transition: border-color .15s, box-shadow .15s; }
+.driver-card:hover { border-color: #B0BEC5; box-shadow: 0 6px 16px #26323812; }
+/* Los pendientes llevan una barra a la izquierda para que se noten */
+.driver-card[data-status="pending"] { border-left: 4px solid #455A64; }
+.driver-card-top { display: flex; align-items: center; gap: 11px; }
+.driver-card-name { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.driver-card-name strong { color: #263238; font-size: 14px; }
+.driver-card-name span { overflow: hidden; color: var(--slate); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.driver-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; padding: 12px; border-radius: 9px; background: #CFD8DC4d; }
+.driver-facts .span-2 { grid-column: span 2; }
+.driver-facts dt { margin-bottom: 3px; color: var(--slate); font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.driver-facts dd { margin: 0; color: #263238; font-size: 12px; font-weight: 600; }
+.driver-card-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.driver-card-actions .btn { flex: 1; }
+
+/* ---------- Tarifas ---------- */
+.fare-list { display: grid; gap: 12px; }
+.fare-card { padding: 16px; border: 1px solid #CFD8DC; border-radius: 12px; background: #fff; }
+.fare-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.fare-card-head strong { color: #263238; font-size: 15px; }
+.fare-flag { padding: 4px 9px; border-radius: 20px; background: #B0BEC5; color: #263238; font-size: 9px; font-weight: 700; letter-spacing: .12em; }
+.fare-card-price { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #B0BEC5; }
+.fare-card-price span { color: var(--slate); font-size: 12px; }
+.fare-card-price b { color: #263238; font: 600 22px 'Space Grotesk', sans-serif; }
+.fare-card-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.fare-card-grid dt { color: var(--slate); font-size: 10px; }
+.fare-card-grid dd { margin: 2px 0 0; color: #263238; font-size: 12px; font-weight: 600; }
+/* La tarifa activa va en oscuro */
+.fare-card.fare-active { border-color: #263238; background: #263238; }
+.fare-active .fare-card-head strong, .fare-active .fare-card-price b, .fare-active .fare-card-grid dd { color: #fff; }
+.fare-active .fare-card-price span, .fare-active .fare-card-grid dt { color: #B0BEC5; }
+.fare-active .fare-card-price { border-color: #455A64; }
+.fare-preview { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0 14px; padding: 13px 14px; border: 1px dashed #B0BEC5; border-radius: 9px; background: #CFD8DC4d; color: var(--slate); font-size: 12px; }
+.fare-preview b { color: #263238; font: 600 20px 'Space Grotesk', sans-serif; }
+
+/* ---------- Viajes ---------- */
+.admin-summary { display: grid; justify-items: end; gap: 2px; }
+.admin-summary span { color: var(--slate); font-size: 11px; }
+.admin-summary b { color: #263238; font: 600 20px 'Space Grotesk', sans-serif; }
+.admin-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; align-items: end; gap: 10px; margin-bottom: 18px; padding: 14px; border-radius: 11px; background: #CFD8DC4d; }
+.admin-filters label { display: grid; gap: 5px; }
+.admin-filters label span { color: var(--slate); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.admin-filters select, .admin-filters input { min-height: 38px; padding: 0 10px; border: 1px solid #B0BEC5; border-radius: 7px; background: #fff; color: #263238; font-size: 12px; }
+.admin-filter-actions { display: flex; gap: 6px; }
+.admin-table th { color: var(--slate); }
+.admin-table tbody tr:hover { background: #CFD8DC33; }
+.admin-table .num { text-align: right; font-weight: 600; white-space: nowrap; }
+
+/* ---------- Reportes ---------- */
+.report-block { margin-top: 18px; }
+.report-block:first-child { margin-top: 0; }
+.report-block h3 { margin-bottom: 11px; color: #263238; font-size: 16px; }
+.report-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.report-stat { display: grid; gap: 5px; padding: 14px; border: 1px solid #CFD8DC; border-radius: 11px; background: #fff; }
+.report-stat span { color: var(--slate); font-size: 11px; }
+.report-stat b { color: #263238; font: 600 21px 'Space Grotesk', sans-serif; }
+.report-stat:first-child { border-color: #263238; background: #263238; }
+.report-stat:first-child span { color: #B0BEC5; }
+.report-stat:first-child b { color: #fff; }
+
+/* ---------- Auditoría ---------- */
+.audit-action { display: inline-block; padding: 4px 8px; border-radius: 6px; background: #CFD8DC80; color: #263238; font: 600 11px 'Space Grotesk', monospace; }
+
+/* ---------- Celular y tablet ---------- */
+@media (max-width: 980px) {
+  .admin-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-grid, .admin-grid-fares { grid-template-columns: 1fr; }
+  .admin-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-filter-actions { grid-column: span 2; }
+}
+@media (max-width: 620px) {
+  .admin-hero { padding: 22px 16px 0; border-radius: 14px; }
+  .admin-hero-top { flex-direction: column; }
+  .admin-refresh { min-height: 36px; font-size: 12px; }
+  .admin-tab { padding: 10px 12px 12px; font-size: 12px; }
+  .admin-kpis { gap: 9px; }
+  .admin-kpi { flex-direction: column; gap: 9px; padding: 13px; }
+  .admin-kpi-value { font-size: 20px; }
+  .bar-legend { grid-template-columns: 1fr; }
+  .donut-wrap { flex-direction: column; align-items: stretch; }
+  .donut { margin: 0 auto; }
+  .admin-card-head { flex-wrap: wrap; }
+  .admin-search { min-width: 100%; }
+  .fare-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-filters { grid-template-columns: 1fr; }
+  .admin-filter-actions { grid-column: auto; }
+  .demo-buttons { grid-template-columns: 1fr; }
+}
+
+/* ---------- Impresión del reporte ---------- */
+@media print {
+  .admin-hero, .topbar, ion-header, .footer, .btn, .demo-mode-banner { display: none !important; }
+  .admin-card { border: 0; box-shadow: none; }
+}
