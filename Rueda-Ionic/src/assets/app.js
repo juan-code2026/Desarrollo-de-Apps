@@ -1,6 +1,6 @@
 /*
  * ============================================================================
- *  RUEDA · APLICACIÓN PRINCIPAL (cliente, conductor, sesión y arranque)
+ *  RUEDA · APLICACIÓN PRINCIPAL (sesión, cliente y arranque)
  * ============================================================================
  *  La interfaz es JavaScript plano: cada pantalla es una función que arma HTML
  *  y lo pone dentro de #main-content (ver home.page.html). Los clics y
@@ -9,6 +9,7 @@
  *
  *  Archivos relacionados:
  *    - admin.js   → panel de administrador (se carga antes que este).
+ *    - driver.js  → panel del conductor (se carga antes que este).
  *    - styles.css → estilos generales y del cliente.
  *    - admin.css  → estilos del panel de administrador.
  *
@@ -141,6 +142,8 @@ function destroyClientMap() {
   mapRoute = null;
   destroyActiveRideMap();
   stopActiveRidePolling();
+  // Definida en driver.js: detiene GPS y temporizadores del conductor.
+  if (typeof stopDriverLoops === 'function') stopDriverLoops();
 }
 
 // Elimina el mapa en vivo del viaje activo.
@@ -1209,7 +1212,8 @@ async function drawActiveRide(active, firstDraw = false) {
 
   // Conductor asignado pero sin GPS: no hay cómo calcular cuánto le falta.
   if (['assigned', 'in_progress'].includes(active.status) && !points.driver) {
-    setNavBanner(active.status === 'assigned' ? 'Conductor en camino' : 'Viaje en curso', 'Esperando la ubicación GPS del conductor…');
+    if (sessionUser?.role === 'driver') setNavBanner('Ubicándote…', 'Esperando tu posición (GPS o simulación)');
+    else setNavBanner(active.status === 'assigned' ? 'Conductor en camino' : 'Viaje en curso', 'Esperando la ubicación GPS del conductor…');
     if (firstDraw) {
       const bounds = [points.origin, points.destination].filter(Boolean);
       if (bounds.length > 1) activeRideMap.fitBounds(L.latLngBounds(bounds), { padding: [50, 50], maxZoom: 16 });
@@ -1236,7 +1240,11 @@ async function drawActiveRide(active, firstDraw = false) {
     const arrival = new Date(Date.now() + minutes * 60000);
     const arrivalText = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit' }).format(arrival);
     const distance = route.distanceKm < 1 ? `${Math.round(route.distanceKm * 1000)} m` : `${route.distanceKm.toFixed(1)} km`;
-    if (active.status === 'assigned') setNavBanner(`Llega en ${minutes} min`, `${distance} para recogerte · ${arrivalText}`);
+    const isDriver = sessionUser?.role === 'driver';
+    if (isDriver && active.status === 'assigned') setNavBanner(`${minutes} min a la recogida`, `${distance} · llegas ${arrivalText}`);
+    else if (isDriver && active.status === 'in_progress') setNavBanner(`${minutes} min al destino`, `${distance} restantes · llegada ${arrivalText}`);
+    else if (isDriver && active.status === 'driver_arrived') setNavBanner('Espera al cliente', `Luego: ${distance} hasta el destino`);
+    else if (active.status === 'assigned') setNavBanner(`Llega en ${minutes} min`, `${distance} para recogerte · ${arrivalText}`);
     else if (active.status === 'in_progress') setNavBanner(`${minutes} min a tu destino`, `${distance} restantes · llegada ${arrivalText}`);
     else if (active.status === 'driver_arrived') setNavBanner('Tu conductor está afuera', `Viaje de ${distance} · unos ${minutes} min`);
     else setNavBanner(`Viaje de ${minutes} min`, `${distance} por la ruta sugerida`);
@@ -1401,71 +1409,11 @@ function estimateMarkup(estimate) {
   return `<div class="trip-result-wrap"><div class="trip-result"><div><div class="inline-meta">${escapeHtml(estimate.distance_km)} km · ${escapeHtml(estimate.duration_min)} min aprox.</div><div class="field-hint">${source} · ${escapeHtml(estimate.currency || 'COP')}</div></div><div class="fare-value">${money(estimate.estimated_fare)}</div></div>${breakdownHtml}</div>`;
 }
 
-/* ---------- Panel del conductor ---------- */
-
-// PANEL DEL CONDUCTOR: disponibilidad, solicitudes cercanas y viaje en curso.
-async function renderDriver() {
-  // Si el servidor responde 403 a las solicitudes, el conductor no está aprobado.
-  let blockedByApproval = false;
-  const [requestsResponse, activeResponse] = await Promise.all([
-    request('/driver/ride-requests').catch((error) => {
-      if (error.status !== 403) throw error;
-      blockedByApproval = true;
-      return { requests: [] };
-    }),
-    request('/auth/me'),
-  ]);
-  const requests = extractArray(requestsResponse, 'requests');
-  const driver = activeResponse.user?.driver || activeResponse.user?.profile || activeResponse.driver || {};
-  // OJO: según la documentación, GET /auth/me NO trae approval_status del conductor.
-  // Antes eso hacía que siempre saliera "pendiente de aprobación". Ahora:
-  //   1) si la API sí lo envía, se usa;
-  //   2) si no, se usa lo que respondió PUT /driver/availability la última vez
-  //      (devuelve 403 con approval_status si no está aprobado);
-  //   3) si no se sabe, se deja activar la disponibilidad y el servidor decide.
-  const approvalStatus = driver.approval_status || activeResponse.user?.approval_status
-    || (blockedByApproval ? 'pending' : sessionUser.approval_status);
-  const approved = approvalStatus ? approvalStatus === 'approved' : true;
-  const available = driver.availability_status === 'available' || sessionUser.availability_status === 'available';
-  const requestsHtml = requests.length ? requests.map((ride) => `<article class="record"><div><h3>Solicitud #${escapeHtml(ride.id)}</h3>${tripPath(ride.origin_name, ride.destination_name)}<p>${escapeHtml(ride.client?.name || 'Cliente')} · ${escapeHtml(ride.client?.phone || '')}</p><div class="record-actions"><button class="btn btn-primary btn-small" data-action="accept-ride" data-id="${escapeHtml(ride.id)}" ${!approved || !available ? 'disabled' : ''}>Aceptar viaje →</button><a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="https://www.openstreetmap.org/search?query=${encodeURIComponent(ride.origin_name || '')}">Ver origen ↗</a></div></div><div class="record-right"><span class="fare-value">${money(ride.estimated_fare)}</span><p class="inline-meta">${escapeHtml(ride.estimated_distance_km || '—')} km</p></div></article>`).join('') : emptyState('Cuando estés disponible, aquí aparecerán las solicitudes de viaje.', '◷');
-  app.innerHTML = `${pageHeader(`Hola, ${escapeHtml((sessionUser.name || '').split(' ')[0] || 'conductor/a')}.`, 'Tu próxima oportunidad empieza aquí.', '<button class="btn btn-outline btn-small" data-action="refresh">Actualizar solicitudes</button>')}
-    <div class="content-grid">
-      <div class="stack"><section class="driver-banner"><div class="availability-row"><div><p class="eyebrow" style="color:#B0BEC5">Panel del conductor</p><h2>${approved ? (available ? 'Estás en línea.' : 'Tú decides cuándo salir.') : 'Cuenta pendiente de aprobación'}</h2><p>${approved ? (available ? 'Ya puedes recibir solicitudes cercanas.' : 'Activa tu disponibilidad para empezar a recibir viajes.') : 'El administrador debe aprobar tus documentos. Si ya te aprobó, activa el interruptor para ponerte en línea.'}</p></div><button class="toggle ${available ? 'on' : ''}" aria-label="Cambiar disponibilidad" title="${approved ? 'Cambiar disponibilidad' : 'Intentar ponerse en línea (el servidor verifica la aprobación)'}" data-action="availability" data-status="${available ? 'unavailable' : 'available'}"><span></span></button></div></section>
-      ${!approved ? '<div class="notice">Tu cuenta de conductor aún no está aprobada. Contacta al administrador de la plataforma para revisar el estado de tu solicitud.</div>' : ''}
-      <section class="card section-card"><div class="section-title"><h2>Solicitudes cercanas</h2>${available ? statusBadge('available') : statusBadge('unavailable')}</div>${requestsHtml}</section>
-      <section class="card section-card"><div class="section-title"><h2>Viaje en curso</h2></div><div id="driver-trip-content">${emptyState('Acepta una solicitud para empezar un viaje.', '↗')}</div></section></div>
-      <div class="stack"><section class="card section-card"><div class="section-title"><h2>Tu cuenta</h2></div><div class="record"><div><h3>${escapeHtml(sessionUser.name || 'Conductor')}</h3><p>${escapeHtml(sessionUser.email || '')}</p></div>${statusBadge(approvalStatus || 'approved')}</div><p class="field-hint">Estado de aprobación y disponibilidad se consultan directamente en la API.</p></section><section class="card section-card"><div class="section-title"><h3>Recordatorio</h3></div><p class="muted" style="font-size:13px">Acepta una solicitud para ver los datos del cliente y completar cada etapa del viaje desde este panel.</p></section></div>
-    </div>`;
-  await loadDriverCurrentTrip();
-}
-
-// Carga el viaje en curso del conductor (GET /driver/active, si el backend lo tiene).
-async function loadDriverCurrentTrip() {
-  try {
-    const [clientActive, me] = await Promise.all([request('/driver/active').catch((error) => {
-      if (/404/.test(error.message)) return null;
-      throw error;
-    }), request('/auth/me')]);
-    const trip = clientActive?.trip || clientActive?.data || clientActive?.active_trip;
-    const container = document.querySelector('#driver-trip-content');
-    if (!container) return;
-    if (!trip) {
-      container.innerHTML = emptyState('No tienes un viaje activo.', '↗');
-      return;
-    }
-    container.innerHTML = `<article class="record"><div><h3>Viaje #${escapeHtml(trip.id)}</h3>${tripPath(trip.request?.origin_name || trip.origin_name, trip.request?.destination_name || trip.destination_name)}<p>Cliente: ${escapeHtml(trip.client?.name || trip.client?.user?.name || 'Cliente')}</p><div class="record-actions">${trip.status === 'assigned' ? `<button class="btn btn-outline btn-small" data-action="trip-arrive" data-id="${escapeHtml(trip.id)}">Ya llegué</button>` : ''}${trip.status === 'driver_arrived' ? `<button class="btn btn-primary btn-small" data-action="trip-start" data-id="${escapeHtml(trip.id)}">Iniciar viaje</button>` : ''}${trip.status === 'in_progress' ? `<button class="btn btn-primary btn-small" data-action="trip-complete" data-id="${escapeHtml(trip.id)}">Finalizar viaje</button>` : ''}</div></div><div class="record-right">${statusBadge(trip.status)}<p class="inline-meta" style="margin-top:9px">${money(trip.estimated_fare)}</p></div></article>`;
-    const driver = me.user?.driver || me.user?.profile || {};
-    if (driver.availability_status) sessionUser.availability_status = driver.availability_status;
-  } catch (error) {
-    const container = document.querySelector('#driver-trip-content');
-    if (container) container.innerHTML = `<div class="error-box">No se pudo consultar el viaje activo: ${escapeHtml(error.message)}</div>`;
-  }
-}
-
 /* ---------- Acciones que llaman a la API ---------- */
 
 // Borra el token y el usuario de la pestaña.
 function clearSession() {
+  sessionStorage.removeItem('rueda_driver_state');
   sessionStorage.removeItem(STORAGE_KEYS.token);
   sessionStorage.removeItem(STORAGE_KEYS.user);
   sessionUser = null;
@@ -1569,29 +1517,6 @@ async function submitRating(form) {
   } finally {
     button.disabled = false;
   }
-}
-
-// Acciones del conductor: aceptar solicitud, "ya llegué", iniciar y finalizar viaje.
-async function driverAction(action, id) {
-  if (action === 'accept-ride') {
-    const result = await request(`/driver/ride-requests/${encodeURIComponent(id)}/accept`, { method: 'POST', body: JSON.stringify({}) });
-    showToast(result.message || 'Viaje aceptado.');
-  } else {
-    const endpoint = { 'trip-arrive': 'arrive', 'trip-start': 'start', 'trip-complete': 'complete' }[action];
-    let body = {};
-    if (action === 'trip-complete') {
-      const actual_distance_km = Number(window.prompt('Distancia recorrida en km:', '1.5'));
-      const actual_duration_min = Number(window.prompt('Duración del viaje en minutos:', '10'));
-      if (!Number.isFinite(actual_distance_km) || !Number.isFinite(actual_duration_min) || actual_distance_km <= 0 || actual_duration_min <= 0) {
-        showToast('Ingresa una distancia y duración válidas.', true);
-        return;
-      }
-      body = { actual_distance_km, actual_duration_min };
-    }
-    const result = await request(`/driver/trips/${encodeURIComponent(id)}/${endpoint}`, { method: 'POST', body: JSON.stringify(body) });
-    showToast(result.message || 'Estado del viaje actualizado.');
-  }
-  await renderDashboard();
 }
 
 /* ---------- Manejo de eventos (delegación) ---------- */
@@ -1706,27 +1631,6 @@ async function handleClick(event) {
       const slot = document.querySelector('#trips-slot');
       if (slot) slot.innerHTML = tripsMarkup(clientTripsCache);
       target.textContent = showAllTrips ? 'Ver menos' : `Ver los ${clientTripsCache.length} viajes`;
-    }
-    else if (['accept-ride', 'trip-arrive', 'trip-start', 'trip-complete'].includes(action)) await driverAction(action, target.dataset.id);
-    else if (action === 'availability') {
-      let result;
-      try {
-        result = await request('/driver/availability', { method: 'PUT', body: JSON.stringify({ status: target.dataset.status }) });
-      } catch (error) {
-        // 403 = el admin no lo ha aprobado; se recuerda para mostrar el aviso.
-        if (error.status === 403) {
-          sessionUser.approval_status = error.payload?.approval_status || 'pending';
-          sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(sessionUser));
-          await renderDashboard();
-        }
-        throw error;
-      }
-      // Si el servidor aceptó el cambio, el conductor está aprobado.
-      sessionUser.approval_status = 'approved';
-      sessionUser.availability_status = result.availability_status;
-      sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(sessionUser));
-      showToast(result.message || 'Disponibilidad actualizada.');
-      await renderDashboard();
     }
   } catch (error) { showToast(error.message, true); }
 }

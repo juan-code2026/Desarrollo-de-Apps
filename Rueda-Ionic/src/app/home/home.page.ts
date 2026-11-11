@@ -15,9 +15,10 @@ export class HomePage implements AfterViewInit {
   /**
    * Scripts a cargar, en orden:
    *  1. admin.js → panel de administrador (debe existir antes de que app.js arranque).
-   *  2. app.js   → sesión, panel de cliente y conductor, y arranque de la app.
+   *  2. driver.js → panel del conductor.
+   *  3. app.js   → sesión, panel de cliente y arranque de la app.
    */
-  private readonly scripts = ['assets/admin.js', 'assets/app.js'];
+  private readonly scripts = ['assets/admin.js', 'assets/driver.js', 'assets/app.js'];
 
   ngAfterViewInit(): void {
     this.loadScripts(this.scripts);

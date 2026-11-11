@@ -69,7 +69,7 @@ h3 { font-size: 19px; margin-bottom: 8px; }
 .eyebrow { color: #455A64; font-size: 11px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; margin-bottom: 12px; }
 .muted, .subtitle { color: var(--muted); line-height: 1.6; }
 .subtitle { max-width: 520px; font-size: 16px; }
-.btn { display: inline-flex; gap: 8px; justify-content: center; align-items: center; min-height: 43px; padding: 0 17px; border: 1px solid transparent; border-radius: 6px; background: var(--ink); color: white; font-weight: 600; transition: transform .15s, background .15s; }
+.btn { text-decoration: none; display: inline-flex; gap: 8px; justify-content: center; align-items: center; min-height: 43px; padding: 0 17px; border: 1px solid transparent; border-radius: 6px; background: var(--ink); color: white; font-weight: 600; transition: transform .15s, background .15s; }
 .btn:hover { transform: translateY(-1px); background: #263238; }
 .btn-primary { background: var(--slate); color: #fff; }
 .btn-primary:hover { background: var(--slate-dark); }

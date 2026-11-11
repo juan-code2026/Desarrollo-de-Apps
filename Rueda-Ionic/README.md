@@ -85,7 +85,13 @@ Cada computador corre su propia copia de la app y los dos se conectan al mismo s
 | 6 | Ve "En curso" y el carro avanzando al destino | **Inicia** el viaje | `POST /driver/trips/{id}/start` |
 | 7 | Recibe "¡Llegaste!" y puede **calificar** desde el historial | **Finaliza** el viaje | `POST /driver/trips/{id}/complete` · `POST /client/trips/{id}/rating` |
 
-**Importante para el panel del conductor:** el mapa del cliente solo se mueve si el conductor envía su ubicación con `POST /driver/location` (incluyendo `trip_id`) mientras tiene un viaje asignado o en curso. Por ejemplo, con `navigator.geolocation.watchPosition` cada 5 segundos. Si no la envía, el cliente verá "Esperando la ubicación GPS del conductor…".
+**Qué hace el panel del conductor durante la prueba:**
+
+- **Solicitudes:** se actualizan solas cada 8 s mientras está en línea, y avisa cuando llega una nueva.
+- **Al aceptar,** pasa a la pantalla del viaje: pasos, mapa con la ruta, datos del cliente y un botón grande con la siguiente acción.
+- **Ubicación:** la envía a `POST /driver/location` (con `trip_id`) cada 5 s, y así el cliente ve el carro moverse. Puede usar el **GPS real** o **Simular recorrido**. La simulación hace que el carro avance solo por las calles hasta la recogida y luego hasta el destino, y se activa sola si el computador no tiene GPS o no se da permiso. **Para la prueba en salón se recomienda la simulación.**
+- **Al finalizar,** propone la distancia recorrida y los minutos transcurridos.
+- **Datos guardados localmente:** la API no tiene un endpoint para consultar el viaje activo del conductor ni su disponibilidad. Por eso el panel guarda ambos en la pestaña. No cierres la pestaña del conductor en medio de un viaje.
 
 **Qué hace el panel del cliente durante la prueba:** consulta `GET /client/active` cada 5 segundos y avisa cada cambio de estado. Recuerda el origen y el destino que pidió, porque la API deja de enviarlos cuando hay conductor asignado. Si la sesión vence, vuelve al inicio de sesión.
 
@@ -93,10 +99,12 @@ Cada computador corre su propia copia de la app y los dos se conectan al mismo s
 
 | Archivo | Qué contiene |
 |---|---|
-| `src/assets/app.js` | Sesión, inicio de sesión/registro, panel de cliente (mapa, viaje en vivo, autocompletado) y panel de conductor. |
+| `src/assets/app.js` | Sesión, inicio de sesión/registro, panel de cliente (mapa, viaje en vivo, autocompletado) y funciones compartidas. |
 | `src/assets/admin.js` | Todo el panel de administrador y su modo demo. Se carga antes que `app.js`. |
+| `src/assets/driver.js` | Todo el panel del conductor: disponibilidad, solicitudes, viaje paso a paso y envío de ubicación (GPS o simulada). Se carga antes que `app.js`. |
 | `src/assets/styles.css` | Estilos generales y del cliente. |
 | `src/assets/admin.css` | Estilos del panel de administrador. |
+| `src/assets/driver.css` | Estilos del panel del conductor. |
 | `src/app/home/home.page.ts` | Carga los scripts en orden. |
 
 El código está comentado en español: cada sección y cada función tiene una explicación de lo que hace.

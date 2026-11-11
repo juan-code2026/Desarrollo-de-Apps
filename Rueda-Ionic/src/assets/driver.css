@@ -1,0 +1,76 @@
+/*
+ * ============================================================================
+ *  RUEDA · ESTILOS DEL PANEL DEL CONDUCTOR
+ *  Misma paleta y significado de colores que el resto (ver styles.css):
+ *  verde = en línea / aceptar / finalizar, ámbar = llegar (atención), pizarra = base.
+ *  Reutiliza clases de admin.css (admin-card, admin-chip, filter-chip...).
+ * ============================================================================
+ */
+
+/* ---------- Encabezado con interruptor de disponibilidad ---------- */
+.driver-hero { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; padding: 26px clamp(20px, 4vw, 34px); overflow: hidden; border-radius: 18px; background: linear-gradient(120deg, #263238 0%, #455A64 100%); color: #fff; }
+.driver-hero::after { position: absolute; right: -80px; top: -140px; width: 300px; height: 300px; border: 1px solid #CFD8DC1f; border-radius: 50%; content: ''; pointer-events: none; }
+.driver-hero h1 { margin: 0 0 6px; color: #fff; font-size: clamp(28px, 4vw, 40px); }
+.driver-hero .admin-kicker span { background: #B0BEC5; }
+/* En línea: el puntito del encabezado se vuelve verde */
+.driver-hero.is-online .admin-kicker span { background: var(--success); box-shadow: 0 0 0 5px #2E7D5B33; }
+.driver-hero .status { position: relative; z-index: 1; }
+
+/* Interruptor grande: gris apagado → verde en línea */
+.online-switch { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; flex: 0 0 auto; padding: 8px 16px 8px 8px; border: 1px solid #CFD8DC40; border-radius: 40px; background: #ffffff14; color: #fff; text-align: left; transition: background .2s; }
+.online-switch:hover { background: #ffffff22; }
+.online-knob { position: relative; width: 52px; height: 30px; flex: 0 0 auto; border-radius: 20px; background: #B0BEC5; transition: background .2s; }
+.online-knob::after { position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px #0003; content: ''; transition: transform .2s; }
+.online-switch.on .online-knob { background: var(--success); }
+.online-switch.on .online-knob::after { transform: translateX(22px); }
+.online-text { display: grid; gap: 1px; }
+.online-text b { font-size: 14px; }
+.online-text small { color: #B0BEC5; font-size: 11px; }
+
+/* ---------- Solicitudes ---------- */
+.request-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.request-card { display: grid; gap: 12px; padding: 16px; border: 1px solid #CFD8DC; border-left: 4px solid var(--warning); border-radius: 12px; background: #fff; animation: request-in .35s ease-out; }
+@keyframes request-in { from { opacity: 0; transform: translateY(6px); } }
+.request-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.request-card-top > div { display: grid; gap: 3px; }
+.request-fare { color: #263238; font: 600 24px 'Space Grotesk', sans-serif; letter-spacing: -.03em; }
+.request-card .route-summary { margin: 0; }
+.request-client { display: flex; align-items: center; gap: 9px; margin: 0; color: #263238; font-size: 13px; font-weight: 600; }
+.request-client .admin-avatar { width: 30px; height: 30px; font-size: 11px; }
+
+/* ---------- Viaje en curso ---------- */
+.driver-trip-grid { grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); }
+.driver-map-card { padding: 0; overflow: hidden; }
+.driver-map-card .live-map-wrap { margin: 0; border: 0; }
+.driver-map { height: 460px; }
+.trip-cta { min-height: 52px; margin-top: 14px; font-size: 15px; }
+.btn-warning-solid { background: var(--warning); color: #fff; }
+.btn-warning-solid:hover { background: var(--warning-ink); }
+
+/* Barra de pasos del viaje */
+.trip-stepper { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+.trip-stepper li { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #B0BEC5; border-radius: 10px; background: #fff; color: var(--slate); font-size: 12px; font-weight: 600; }
+.trip-stepper li span { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #CFD8DC; color: #263238; font-size: 11px; }
+.trip-stepper li.done { border-color: #B5D6C4; background: var(--success-soft); color: var(--success-ink); }
+.trip-stepper li.done span { background: var(--success); color: #fff; }
+.trip-stepper li.current { border-color: #263238; background: #263238; color: #fff; }
+.trip-stepper li.current span { background: #fff; color: #263238; }
+
+/* Tarjeta de ubicación compartida */
+.location-mode { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.location-status { margin: 0 0 8px; padding: 10px 12px; border-radius: 9px; background: #CFD8DC66; color: #263238; font-size: 12px; font-weight: 600; }
+.location-status::before { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: #B0BEC5; content: ''; }
+.location-status.ok { background: var(--success-soft); color: var(--success-ink); }
+.location-status.ok::before { background: var(--success); animation: blink 1.6s infinite; }
+.location-status.error { background: var(--danger-soft); color: var(--danger-ink); }
+.location-status.error::before { background: var(--danger); }
+
+@media (max-width: 980px) {
+  .driver-trip-grid { grid-template-columns: 1fr; }
+  .driver-map { height: 340px; }
+}
+@media (max-width: 620px) {
+  .driver-hero { flex-direction: column; align-items: flex-start; }
+  .online-switch { width: 100%; }
+  .trip-stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
