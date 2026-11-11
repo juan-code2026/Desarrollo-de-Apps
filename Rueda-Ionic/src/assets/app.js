@@ -1,7 +1,8 @@
 const STORAGE_KEYS = { token: 'rueda_token', user: 'rueda_user', apiUrl: 'rueda_api_url' };
 const DEMO_TOKEN = 'rueda-local-client-demo';
 const DEMO_DATA_KEY = 'rueda_client_demo_data';
-const DEFAULT_API_URL = 'http://20.20.1.52:8000/api';
+const DEFAULT_API_URL = 'http://20.20.1.22:8000/api';
+const PREVIOUS_DEFAULT_API_URLS = ['http://20.20.1.157:8000/api', 'http://20.20.1.52:8000/api'];
 const app = document.querySelector('#main-content');
 const topbarActions = document.querySelector('#topbar-actions');
 let sessionUser = readStoredUser();
@@ -21,8 +22,7 @@ function readStoredUser() {
 
 function apiUrl() {
   const savedUrl = localStorage.getItem(STORAGE_KEYS.apiUrl);
-  const previousDefault = 'http://20.20.1.157:8000/api';
-  return (!savedUrl || savedUrl.replace(/\/+$/, '') === previousDefault
+  return (!savedUrl || PREVIOUS_DEFAULT_API_URLS.includes(savedUrl.replace(/\/+$/, ''))
     ? DEFAULT_API_URL
     : savedUrl).replace(/\/+$/, '');
 }
