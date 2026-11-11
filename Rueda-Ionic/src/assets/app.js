@@ -189,9 +189,163 @@ function applyMapPoint(point, latitude, longitude, pan = true) {
   if (!nameInput.value.trim() || nameInput.dataset.mapLabel === 'true') {
     nameInput.value = `Punto seleccionado (${lat}, ${lng})`;
     nameInput.dataset.mapLabel = 'true';
+    fillAddressFromMap(nameInput, lat, lng);
   }
   syncMapMarker(point, [lat, lng], pan);
   updateMapStatus(`${point === 'origin' ? 'Recogida' : 'Destino'} seleccionado: ${lat}, ${lng}. Puedes arrastrar el marcador para ajustarlo.`);
+}
+
+/* ---------- Autocompletado de direcciones (Photon / OpenStreetMap) ---------- */
+
+const GEOCODER_URL = 'https://photon.komoot.io';
+// Zona de Bogotá y alrededores para priorizar resultados cercanos.
+const GEOCODER_BBOX = '-74.35,4.40,-73.95,4.90';
+const addressTimers = {};
+const addressResults = {};
+const addressActiveIndex = {};
+let addressRequestId = 0;
+
+function addressField(point, label, placeholder) {
+  const id = `${point}_name`;
+  return `<div class="field autocomplete">
+    <label for="${id}">${label}</label>
+    <input id="${id}" name="${id}" required placeholder="${escapeHtml(placeholder)}" autocomplete="off"
+      role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${id}-list" data-address-point="${point}">
+    <ul id="${id}-list" class="address-suggestions" role="listbox" hidden></ul>
+  </div>`;
+}
+
+function featureLabel(properties = {}) {
+  const street = [properties.street, properties.housenumber].filter(Boolean).join(' # ');
+  const title = properties.name || street || properties.locality || properties.district || properties.city || 'Lugar sin nombre';
+  const detail = [
+    properties.name && street ? street : '',
+    properties.locality || properties.district,
+    properties.city || properties.county,
+  ].filter((value, index, list) => value && value !== title && list.indexOf(value) === index);
+  return { title, detail: detail.join(', ') };
+}
+
+function featureText(properties) {
+  const { title, detail } = featureLabel(properties);
+  return detail ? `${title}, ${detail}` : title;
+}
+
+async function searchAddresses(query) {
+  const center = clientMap?.getCenter();
+  const params = new URLSearchParams({
+    q: query,
+    limit: '6',
+    lat: String(center?.lat ?? 4.6533),
+    lon: String(center?.lng ?? -74.0836),
+    bbox: GEOCODER_BBOX,
+  });
+  const response = await fetch(`${GEOCODER_URL}/api/?${params}`);
+  if (!response.ok) throw new Error('Búsqueda no disponible');
+  const payload = await response.json();
+  return (payload.features || []).filter((feature) => feature.geometry?.coordinates?.length === 2);
+}
+
+function closeSuggestions(input) {
+  const list = document.querySelector(`#${input.id}-list`);
+  if (list) {
+    list.hidden = true;
+    list.innerHTML = '';
+  }
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-activedescendant');
+  addressActiveIndex[input.id] = -1;
+}
+
+function renderSuggestions(input, features, message = '') {
+  const list = document.querySelector(`#${input.id}-list`);
+  if (!list) return;
+  addressResults[input.id] = features;
+  addressActiveIndex[input.id] = -1;
+  if (!features.length) {
+    list.innerHTML = `<li class="address-empty">${escapeHtml(message || 'No encontramos esa dirección. Prueba con otra o elige el punto en el mapa.')}</li>`;
+  } else {
+    list.innerHTML = features.map((feature, index) => {
+      const { title, detail } = featureLabel(feature.properties);
+      return `<li id="${input.id}-option-${index}" role="option" class="address-option" data-address-index="${index}" aria-selected="false">
+        <span class="address-pin" aria-hidden="true">⌖</span>
+        <span><strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ''}</span>
+      </li>`;
+    }).join('');
+  }
+  list.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function highlightSuggestion(input, index) {
+  const options = [...document.querySelectorAll(`#${input.id}-list .address-option`)];
+  if (!options.length) return;
+  const next = (index + options.length) % options.length;
+  addressActiveIndex[input.id] = next;
+  options.forEach((option, optionIndex) => {
+    const selected = optionIndex === next;
+    option.classList.toggle('active', selected);
+    option.setAttribute('aria-selected', String(selected));
+    if (selected) option.scrollIntoView({ block: 'nearest' });
+  });
+  input.setAttribute('aria-activedescendant', options[next].id);
+}
+
+function chooseSuggestion(input, index) {
+  const feature = addressResults[input.id]?.[index];
+  if (!feature) return;
+  const [longitude, latitude] = feature.geometry.coordinates;
+  input.value = featureText(feature.properties);
+  input.dataset.mapLabel = 'false';
+  closeSuggestions(input);
+  const point = input.dataset.addressPoint;
+  applyMapPoint(point, latitude, longitude);
+  lastEstimate = null;
+  const estimate = document.querySelector('#estimate-result');
+  if (estimate) estimate.innerHTML = '';
+  // Después de elegir la recogida, el siguiente clic en el mapa coloca el destino.
+  if (point === 'origin' && !mapCoordinates('destination')) {
+    document.querySelector('[data-action="select-map-point"][data-point="destination"]')?.click();
+    document.querySelector('#destination_name')?.focus();
+  }
+}
+
+function onAddressInput(input) {
+  input.dataset.mapLabel = 'false';
+  clearTimeout(addressTimers[input.id]);
+  const query = input.value.trim();
+  if (query.length < 3) {
+    closeSuggestions(input);
+    return;
+  }
+  addressTimers[input.id] = setTimeout(async () => {
+    const requestId = ++addressRequestId;
+    const list = document.querySelector(`#${input.id}-list`);
+    if (list) {
+      list.innerHTML = '<li class="address-empty">Buscando…</li>';
+      list.hidden = false;
+    }
+    try {
+      const features = await searchAddresses(query);
+      if (requestId !== addressRequestId || document.activeElement !== input) return;
+      renderSuggestions(input, features);
+    } catch {
+      if (requestId !== addressRequestId) return;
+      renderSuggestions(input, [], 'No se pudo buscar la dirección. Puedes elegir el punto en el mapa.');
+    }
+  }, 300);
+}
+
+async function fillAddressFromMap(input, latitude, longitude) {
+  try {
+    const response = await fetch(`${GEOCODER_URL}/reverse?lat=${latitude}&lon=${longitude}&limit=1`);
+    if (!response.ok) return;
+    const feature = (await response.json()).features?.[0];
+    // Solo reemplaza el texto si el usuario no escribió nada mientras tanto.
+    if (feature && input.dataset.mapLabel === 'true') input.value = featureText(feature.properties);
+  } catch {
+    // Se conserva el texto con las coordenadas.
+  }
 }
 
 function initializeClientMap() {
@@ -699,10 +853,10 @@ async function renderClient() {
         <form id="ride-form" class="trip-form">
           <div class="location-fields client-location-fields">
             <span class="location-marker"></span>
-            <div class="field"><label for="origin_name">Punto de recogida</label><input id="origin_name" name="origin_name" required placeholder="Ej. Parque de la 93, Bogotá" autocomplete="street-address"></div>
+            ${addressField('origin', 'Punto de recogida', 'Ej. Parque de la 93, Bogotá')}
             <div class="coordinate-row"><div class="field"><label for="origin_latitude">Latitud de recogida</label><input id="origin_latitude" name="origin_latitude" type="number" step="any" min="-90" max="90" required placeholder="4.6766" inputmode="decimal"></div><div class="field"><label for="origin_longitude">Longitud de recogida</label><input id="origin_longitude" name="origin_longitude" type="number" step="any" min="-180" max="180" required placeholder="-74.0483" inputmode="decimal"></div></div>
             <span class="location-marker destination"></span>
-            <div class="field"><label for="destination_name">Destino</label><input id="destination_name" name="destination_name" required placeholder="Ej. Centro Comercial Andino, Bogotá"></div>
+            ${addressField('destination', 'Destino', 'Ej. Centro Comercial Andino, Bogotá')}
             <div class="coordinate-row"><div class="field"><label for="destination_latitude">Latitud de destino</label><input id="destination_latitude" name="destination_latitude" type="number" step="any" min="-90" max="90" required placeholder="4.6664" inputmode="decimal"></div><div class="field"><label for="destination_longitude">Longitud de destino</label><input id="destination_longitude" name="destination_longitude" type="number" step="any" min="-180" max="180" required placeholder="-74.0536" inputmode="decimal"></div></div>
           </div>
           <p class="coordinate-hint"><span aria-hidden="true">ⓘ</span> Para cotizar y pedir el viaje, ingresa las coordenadas de ambos puntos.</p>
@@ -1445,6 +1599,10 @@ document.addEventListener('change', async (event) => {
 document.addEventListener('input', (event) => {
   const field = event.target;
   if (!(field instanceof HTMLInputElement)) return;
+  if (field.dataset.addressPoint) {
+    onAddressInput(field);
+    return;
+  }
   if (field.id === 'origin_latitude' || field.id === 'origin_longitude') {
     syncMapMarker('origin', mapCoordinates('origin'));
   } else if (field.id === 'destination_latitude' || field.id === 'destination_longitude') {
@@ -1464,7 +1622,36 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  const input = event.target;
+  if (input instanceof HTMLInputElement && input.dataset.addressPoint) {
+    const list = document.querySelector(`#${input.id}-list`);
+    const open = list && !list.hidden && addressResults[input.id]?.length;
+    if (event.key === 'ArrowDown' && open) { event.preventDefault(); highlightSuggestion(input, (addressActiveIndex[input.id] ?? -1) + 1); return; }
+    if (event.key === 'ArrowUp' && open) { event.preventDefault(); highlightSuggestion(input, (addressActiveIndex[input.id] ?? 0) - 1); return; }
+    if (event.key === 'Enter' && open) {
+      event.preventDefault();
+      chooseSuggestion(input, Math.max(0, addressActiveIndex[input.id] ?? 0));
+      return;
+    }
+    if (event.key === 'Escape' && list && !list.hidden) { closeSuggestions(input); return; }
+  }
   if (event.key === 'Escape') closeModal();
+});
+
+// mousedown (no click) para elegir la opción antes de que el campo pierda el foco.
+document.addEventListener('mousedown', (event) => {
+  const option = event.target.closest('.address-option');
+  if (!option) return;
+  event.preventDefault();
+  const input = option.closest('.autocomplete')?.querySelector('input');
+  if (input) chooseSuggestion(input, Number(option.dataset.addressIndex));
+});
+
+document.addEventListener('focusout', (event) => {
+  const input = event.target;
+  if (input instanceof HTMLInputElement && input.dataset.addressPoint) {
+    setTimeout(() => { if (document.activeElement !== input) closeSuggestions(input); }, 150);
+  }
 });
 
 async function init() {

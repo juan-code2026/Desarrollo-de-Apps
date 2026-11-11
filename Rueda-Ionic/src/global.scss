@@ -51,4 +51,6 @@ ion-content {
 
 /* @import "@ionic/angular/css/palettes/dark.always.css"; */
 /* @import "@ionic/angular/css/palettes/dark.class.css"; */
-@import "@ionic/angular/css/palettes/dark.system.css";
+/* El diseño de Rueda es claro: se desactiva el modo oscuro automático de Ionic
+   para que el texto no quede blanco sobre las tarjetas blancas. */
+/* @import "@ionic/angular/css/palettes/dark.system.css"; */
