@@ -729,6 +729,7 @@ async function request(path, options = {}) {
       : (validation ? `${message} ${validation}` : message);
     const error = new Error(text);
     error.status = response.status;
+    error.payload = payload;
     throw error;
   }
   return payload || {};
@@ -1404,22 +1405,36 @@ function estimateMarkup(estimate) {
 
 // PANEL DEL CONDUCTOR: disponibilidad, solicitudes cercanas y viaje en curso.
 async function renderDriver() {
+  // Si el servidor responde 403 a las solicitudes, el conductor no está aprobado.
+  let blockedByApproval = false;
   const [requestsResponse, activeResponse] = await Promise.all([
-    request('/driver/ride-requests'),
+    request('/driver/ride-requests').catch((error) => {
+      if (error.status !== 403) throw error;
+      blockedByApproval = true;
+      return { requests: [] };
+    }),
     request('/auth/me'),
   ]);
   const requests = extractArray(requestsResponse, 'requests');
   const driver = activeResponse.user?.driver || activeResponse.user?.profile || activeResponse.driver || {};
-  const approved = driver.approval_status === 'approved';
+  // OJO: según la documentación, GET /auth/me NO trae approval_status del conductor.
+  // Antes eso hacía que siempre saliera "pendiente de aprobación". Ahora:
+  //   1) si la API sí lo envía, se usa;
+  //   2) si no, se usa lo que respondió PUT /driver/availability la última vez
+  //      (devuelve 403 con approval_status si no está aprobado);
+  //   3) si no se sabe, se deja activar la disponibilidad y el servidor decide.
+  const approvalStatus = driver.approval_status || activeResponse.user?.approval_status
+    || (blockedByApproval ? 'pending' : sessionUser.approval_status);
+  const approved = approvalStatus ? approvalStatus === 'approved' : true;
   const available = driver.availability_status === 'available' || sessionUser.availability_status === 'available';
   const requestsHtml = requests.length ? requests.map((ride) => `<article class="record"><div><h3>Solicitud #${escapeHtml(ride.id)}</h3>${tripPath(ride.origin_name, ride.destination_name)}<p>${escapeHtml(ride.client?.name || 'Cliente')} · ${escapeHtml(ride.client?.phone || '')}</p><div class="record-actions"><button class="btn btn-primary btn-small" data-action="accept-ride" data-id="${escapeHtml(ride.id)}" ${!approved || !available ? 'disabled' : ''}>Aceptar viaje →</button><a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="https://www.openstreetmap.org/search?query=${encodeURIComponent(ride.origin_name || '')}">Ver origen ↗</a></div></div><div class="record-right"><span class="fare-value">${money(ride.estimated_fare)}</span><p class="inline-meta">${escapeHtml(ride.estimated_distance_km || '—')} km</p></div></article>`).join('') : emptyState('Cuando estés disponible, aquí aparecerán las solicitudes de viaje.', '◷');
   app.innerHTML = `${pageHeader(`Hola, ${escapeHtml((sessionUser.name || '').split(' ')[0] || 'conductor/a')}.`, 'Tu próxima oportunidad empieza aquí.', '<button class="btn btn-outline btn-small" data-action="refresh">Actualizar solicitudes</button>')}
     <div class="content-grid">
-      <div class="stack"><section class="driver-banner"><div class="availability-row"><div><p class="eyebrow" style="color:#B0BEC5">Panel del conductor</p><h2>${approved ? (available ? 'Estás en línea.' : 'Tú decides cuándo salir.') : 'Cuenta pendiente de aprobación'}</h2><p>${approved ? (available ? 'Ya puedes recibir solicitudes cercanas.' : 'Activa tu disponibilidad para empezar a recibir viajes.') : 'El administrador debe aprobar tus documentos antes de activar la disponibilidad.'}</p></div>${approved ? `<button class="toggle ${available ? 'on' : ''}" aria-label="Cambiar disponibilidad" data-action="availability" data-status="${available ? 'unavailable' : 'available'}"><span></span></button>` : ''}</div></section>
+      <div class="stack"><section class="driver-banner"><div class="availability-row"><div><p class="eyebrow" style="color:#B0BEC5">Panel del conductor</p><h2>${approved ? (available ? 'Estás en línea.' : 'Tú decides cuándo salir.') : 'Cuenta pendiente de aprobación'}</h2><p>${approved ? (available ? 'Ya puedes recibir solicitudes cercanas.' : 'Activa tu disponibilidad para empezar a recibir viajes.') : 'El administrador debe aprobar tus documentos. Si ya te aprobó, activa el interruptor para ponerte en línea.'}</p></div><button class="toggle ${available ? 'on' : ''}" aria-label="Cambiar disponibilidad" title="${approved ? 'Cambiar disponibilidad' : 'Intentar ponerse en línea (el servidor verifica la aprobación)'}" data-action="availability" data-status="${available ? 'unavailable' : 'available'}"><span></span></button></div></section>
       ${!approved ? '<div class="notice">Tu cuenta de conductor aún no está aprobada. Contacta al administrador de la plataforma para revisar el estado de tu solicitud.</div>' : ''}
       <section class="card section-card"><div class="section-title"><h2>Solicitudes cercanas</h2>${available ? statusBadge('available') : statusBadge('unavailable')}</div>${requestsHtml}</section>
       <section class="card section-card"><div class="section-title"><h2>Viaje en curso</h2></div><div id="driver-trip-content">${emptyState('Acepta una solicitud para empezar un viaje.', '↗')}</div></section></div>
-      <div class="stack"><section class="card section-card"><div class="section-title"><h2>Tu cuenta</h2></div><div class="record"><div><h3>${escapeHtml(sessionUser.name || 'Conductor')}</h3><p>${escapeHtml(sessionUser.email || '')}</p></div>${statusBadge(driver.approval_status || 'pending')}</div><p class="field-hint">Estado de aprobación y disponibilidad se consultan directamente en la API.</p></section><section class="card section-card"><div class="section-title"><h3>Recordatorio</h3></div><p class="muted" style="font-size:13px">Acepta una solicitud para ver los datos del cliente y completar cada etapa del viaje desde este panel.</p></section></div>
+      <div class="stack"><section class="card section-card"><div class="section-title"><h2>Tu cuenta</h2></div><div class="record"><div><h3>${escapeHtml(sessionUser.name || 'Conductor')}</h3><p>${escapeHtml(sessionUser.email || '')}</p></div>${statusBadge(approvalStatus || 'approved')}</div><p class="field-hint">Estado de aprobación y disponibilidad se consultan directamente en la API.</p></section><section class="card section-card"><div class="section-title"><h3>Recordatorio</h3></div><p class="muted" style="font-size:13px">Acepta una solicitud para ver los datos del cliente y completar cada etapa del viaje desde este panel.</p></section></div>
     </div>`;
   await loadDriverCurrentTrip();
 }
@@ -1694,7 +1709,20 @@ async function handleClick(event) {
     }
     else if (['accept-ride', 'trip-arrive', 'trip-start', 'trip-complete'].includes(action)) await driverAction(action, target.dataset.id);
     else if (action === 'availability') {
-      const result = await request('/driver/availability', { method: 'PUT', body: JSON.stringify({ status: target.dataset.status }) });
+      let result;
+      try {
+        result = await request('/driver/availability', { method: 'PUT', body: JSON.stringify({ status: target.dataset.status }) });
+      } catch (error) {
+        // 403 = el admin no lo ha aprobado; se recuerda para mostrar el aviso.
+        if (error.status === 403) {
+          sessionUser.approval_status = error.payload?.approval_status || 'pending';
+          sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(sessionUser));
+          await renderDashboard();
+        }
+        throw error;
+      }
+      // Si el servidor aceptó el cambio, el conductor está aprobado.
+      sessionUser.approval_status = 'approved';
       sessionUser.availability_status = result.availability_status;
       sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(sessionUser));
       showToast(result.message || 'Disponibilidad actualizada.');
