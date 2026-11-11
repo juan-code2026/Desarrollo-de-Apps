@@ -710,7 +710,14 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const message = payload?.message || payload?.error || `La API respondió con el código ${response.status}.`;
     const validation = payload?.errors && Object.values(payload.errors).flat().join(' ');
-    throw new Error(validation ? `${message} ${validation}` : message);
+    // 401 = token vencido o inválido. Laravel responde "Unauthenticated.", así que
+    // se traduce y se marca el error para que renderDashboard() vuelva al inicio de sesión.
+    const text = response.status === 401 && /unauthenticated/i.test(message)
+      ? 'Tu sesión expiró. Inicia sesión de nuevo.'
+      : (validation ? `${message} ${validation}` : message);
+    const error = new Error(text);
+    error.status = response.status;
+    throw error;
   }
   return payload || {};
 }
@@ -784,13 +791,19 @@ function authPage(mode = 'login') {
     </section>`;
 }
 
-// Color del globito según el estado (verde, amarillo, rojo o azul).
+// Color del globito según el estado (psicología del color, ver styles.css):
+//   verde   → terminó bien o está habilitado.
+//   ámbar   → está esperando algo o necesita atención.
+//   pizarra → en movimiento, todo marcha (con un punto que parpadea).
+//   rojo    → cancelado, rechazado o suspendido.
+//   gris    → apagado / inactivo, sin que sea un problema.
 function statusClass(status) {
   const value = String(status || '').toLowerCase();
-  if (['approved', 'completed', 'available', 'active', 'in_progress'].includes(value)) return 'status-green';
-  if (['pending', 'requested', 'assigned', 'driver_arrived'].includes(value)) return 'status-yellow';
-  if (['rejected', 'suspended', 'cancelled', 'unavailable'].includes(value)) return 'status-red';
-  return 'status-blue';
+  if (['approved', 'completed', 'available', 'active'].includes(value)) return 'status-green';
+  if (['pending', 'requested', 'driver_arrived'].includes(value)) return 'status-yellow';
+  if (['assigned', 'in_progress'].includes(value)) return 'status-blue';
+  if (['rejected', 'suspended', 'cancelled'].includes(value)) return 'status-red';
+  return 'status-neutral';
 }
 
 // Traducción de los estados que devuelve la API.
@@ -798,7 +811,7 @@ const STATUS_LABELS = {
   requested: 'Buscando conductor', assigned: 'Conductor asignado', driver_arrived: 'Conductor llegó',
   in_progress: 'En curso', completed: 'Finalizado', cancelled: 'Cancelado',
   pending: 'Pendiente', approved: 'Aprobado', rejected: 'Rechazado', suspended: 'Suspendido',
-  available: 'En línea', unavailable: 'Desconectado',
+  available: 'En línea', unavailable: 'Desconectado', inactive: 'Inactiva',
 };
 
 // Globito con el estado traducido al español.
@@ -899,9 +912,10 @@ async function renderDashboard() {
     else if (sessionUser?.role === 'admin') await renderAdmin();
     else throw new Error('La API devolvió un rol desconocido. Contacta al profesor para validar los roles configurados.');
   } catch (error) {
-    if (/401|no autenticado|token/i.test(error.message)) {
+    if (error.status === 401 || /401|no autenticado|token/i.test(error.message)) {
       clearSession();
       authPage();
+      showToast(error.message, true);
     } else {
       app.innerHTML = `<section class="card section-card"><h2>No pudimos cargar el panel</h2><p class="muted">${escapeHtml(error.message)}</p><button class="btn btn-outline" data-action="refresh">Intentar de nuevo</button></section>`;
     }

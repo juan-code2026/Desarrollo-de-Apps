@@ -60,9 +60,10 @@ let adminPendingCount = 0;
 
 // Texto en español para los estados de aprobación que puede elegir el admin.
 const APPROVAL_ACTIONS = {
-  approved: { label: 'Aprobar', verb: 'aprobar', button: 'btn-primary' },
+  // Verde = acción positiva, rojo = negativa, ámbar = precaución (ver styles.css).
+  approved: { label: 'Aprobar', verb: 'aprobar', button: 'btn-success' },
   rejected: { label: 'Rechazar', verb: 'rechazar', button: 'btn-danger-solid' },
-  suspended: { label: 'Suspender', verb: 'suspender', button: 'btn-outline' },
+  suspended: { label: 'Suspender', verb: 'suspender', button: 'btn-warning' },
 };
 
 /* ---------------------------------------------------------------------------
@@ -182,7 +183,7 @@ function driversDonut(stats) {
   const approvedDeg = total ? (approved / total) * 360 : 0;
   const pendingDeg = total ? (pending / total) * 360 : 0;
   return `<div class="donut-wrap">
-    <div class="donut" style="background:conic-gradient(var(--slate-dark) 0 ${approvedDeg}deg, var(--slate-light) ${approvedDeg}deg ${approvedDeg + pendingDeg}deg, #CFD8DC ${approvedDeg + pendingDeg}deg 360deg)" role="img" aria-label="${approved} aprobados y ${pending} pendientes de ${total} conductores">
+    <div class="donut" style="background:conic-gradient(var(--success) 0 ${approvedDeg}deg, var(--warning) ${approvedDeg}deg ${approvedDeg + pendingDeg}deg, #CFD8DC ${approvedDeg + pendingDeg}deg 360deg)" role="img" aria-label="${approved} aprobados y ${pending} pendientes de ${total} conductores">
       <div><strong>${total}</strong><span>conductores</span></div>
     </div>
     <ul class="bar-legend donut-legend">
@@ -365,7 +366,7 @@ function sampleFare(fare, km = 5, minutes = 15) {
 // Tarjeta de una tarifa configurada; la activa se resalta en oscuro.
 function fareCard(fare) {
   return `<article class="fare-card ${fare.active ? 'fare-active' : ''}">
-    <div class="fare-card-head"><strong>${escapeHtml(fare.name || 'Tarifa')}</strong>${fare.active ? '<span class="fare-flag">ACTIVA</span>' : statusBadge('unavailable')}</div>
+    <div class="fare-card-head"><strong>${escapeHtml(fare.name || 'Tarifa')}</strong>${fare.active ? '<span class="fare-flag">ACTIVA</span>' : statusBadge('inactive')}</div>
     <div class="fare-card-price"><span>Viaje de 5 km · 15 min</span><b>${money(sampleFare(fare))}</b></div>
     <dl class="fare-card-grid">
       <div><dt>Base</dt><dd>${money(fare.base_fare)}</dd></div>
