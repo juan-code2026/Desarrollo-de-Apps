@@ -1180,7 +1180,8 @@ function animateMarker(marker, to, duration = 1200) {
     const progress = Math.min(1, (now - start) / duration);
     const eased = 1 - (1 - progress) ** 3;
     marker.setLatLng([from.lat + (to[0] - from.lat) * eased, from.lng + (to[1] - from.lng) * eased]);
-    if (progress < 1 && activeRideMap) requestAnimationFrame(frame);
+    // marker._map deja de existir si el mapa se cerró (cliente o conductor).
+    if (progress < 1 && marker._map) requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
 }

@@ -88,7 +88,14 @@ Cada computador corre su propia copia de la app y los dos se conectan al mismo s
 **Qué hace el panel del conductor durante la prueba:**
 
 - **Solicitudes:** se actualizan solas cada 8 s mientras está en línea, y avisa cuando llega una nueva.
-- **Al aceptar,** pasa a la pantalla del viaje: pasos, mapa con la ruta, datos del cliente y un botón grande con la siguiente acción.
+- **Al aceptar,** pasa a la pantalla del viaje: pasos, datos del cliente y un botón grande con la siguiente acción.
+- **Navegación tipo Waze:** el mapa se actualiza cada segundo y muestra:
+  - Instrucciones giro a giro en español, por ejemplo "En 200 m gira a la derecha por Calle 93".
+  - Velocímetro, minutos y distancia restantes, hora de llegada y barra de avance.
+  - Rastro de por dónde ha pasado el carro.
+  - Aviso al llegar a la recogida y al destino.
+  - Botones para seguir al carro, ver toda la ruta, pantalla completa y abrir la ruta en Waze o Google Maps.
+- **Ganancias del día:** viajes, kilómetros y dinero ganado hoy, guardados en ese computador.
 - **Ubicación:** la envía a `POST /driver/location` (con `trip_id`) cada 5 s, y así el cliente ve el carro moverse. Puede usar el **GPS real** o **Simular recorrido**. La simulación hace que el carro avance solo por las calles hasta la recogida y luego hasta el destino, y se activa sola si el computador no tiene GPS o no se da permiso. **Para la prueba en salón se recomienda la simulación.**
 - **Al finalizar,** propone la distancia recorrida y los minutos transcurridos.
 - **Datos guardados localmente:** la API no tiene un endpoint para consultar el viaje activo del conductor ni su disponibilidad. Por eso el panel guarda ambos en la pestaña. No cierres la pestaña del conductor en medio de un viaje.
