@@ -14,6 +14,18 @@ let clientMap = null;
 let mapMarkers = { origin: null, destination: null };
 let mapRoute = null;
 let selectedMapPoint = 'origin';
+let activeRideMap = null;
+let activeRideLayers = null;
+let activeRidePoll = null;
+let activeRideStatus = null;
+let showAllTrips = false;
+const ACTIVE_RIDE_POLL_MS = 10000;
+const CANCEL_REASONS = [
+  'Cambio de planes',
+  'El conductor tarda demasiado',
+  'Pedí el viaje por error',
+  'Encontré otro medio de transporte',
+];
 
 function readStoredUser() {
   try { return JSON.parse(sessionStorage.getItem(STORAGE_KEYS.user) || 'null'); }
@@ -67,6 +79,23 @@ function destroyClientMap() {
   }
   mapMarkers = { origin: null, destination: null };
   mapRoute = null;
+  destroyActiveRideMap();
+  stopActiveRidePolling();
+}
+
+function destroyActiveRideMap() {
+  if (activeRideMap) {
+    activeRideMap.remove();
+    activeRideMap = null;
+  }
+  activeRideLayers = null;
+}
+
+function stopActiveRidePolling() {
+  if (activeRidePoll) {
+    clearTimeout(activeRidePoll);
+    activeRidePoll = null;
+  }
 }
 
 function mapCoordinates(point) {
@@ -240,6 +269,58 @@ function demoEstimate(values) {
   };
 }
 
+// Simula el avance de un viaje demo: a los pocos segundos se asigna un conductor
+// que se acerca al punto de recogida en cada consulta.
+function advanceDemoRide(data) {
+  const ride = data.active;
+  if (!ride) return;
+  const elapsed = Date.now() - new Date(ride.created_at).getTime();
+  if (ride.status === 'requested' && elapsed > 8000) {
+    ride.status = 'assigned';
+    ride.driver = {
+      id: 31,
+      rating_average: 4.9,
+      user: { name: 'Camila Rodríguez', phone: '3119876543' },
+      latest_location: {
+        latitude: ride.origin_latitude + 0.012,
+        longitude: ride.origin_longitude - 0.009,
+      },
+    };
+    ride.vehicle = { plate: 'RDA-245', brand: 'Chevrolet', model: 'Onix', color: 'Gris' };
+  } else if (ride.status === 'assigned' && ride.driver?.latest_location) {
+    const location = ride.driver.latest_location;
+    const step = 0.35;
+    location.latitude += (ride.origin_latitude - location.latitude) * step;
+    location.longitude += (ride.origin_longitude - location.longitude) * step;
+    const remaining = Math.abs(ride.origin_latitude - location.latitude) + Math.abs(ride.origin_longitude - location.longitude);
+    if (remaining < 0.0008) {
+      ride.status = 'driver_arrived';
+      ride.driver_arrived_at = new Date().toISOString();
+      location.latitude = ride.origin_latitude;
+      location.longitude = ride.origin_longitude;
+    }
+  } else if (ride.status === 'driver_arrived' && Date.now() - new Date(ride.driver_arrived_at).getTime() > 6000) {
+    ride.status = 'in_progress';
+  } else if (ride.status === 'in_progress' && ride.driver?.latest_location) {
+    const location = ride.driver.latest_location;
+    const step = 0.25;
+    location.latitude += (ride.destination_latitude - location.latitude) * step;
+    location.longitude += (ride.destination_longitude - location.longitude) * step;
+    const remaining = Math.abs(ride.destination_latitude - location.latitude) + Math.abs(ride.destination_longitude - location.longitude);
+    if (remaining < 0.0008) {
+      data.trips.unshift({
+        ...ride,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        final_fare: ride.estimated_fare,
+        rating: null,
+      });
+      data.active = null;
+    }
+  }
+  saveDemoData(data);
+}
+
 async function demoRequest(path, options = {}) {
   await new Promise((resolve) => setTimeout(resolve, 180));
   const method = (options.method || 'GET').toUpperCase();
@@ -261,7 +342,13 @@ async function demoRequest(path, options = {}) {
     };
   }
   if (path === '/client/active' && method === 'GET') {
-    return { success: true, has_active: Boolean(data.active), type: 'ride_request', data: data.active };
+    advanceDemoRide(data);
+    return {
+      success: true,
+      has_active: Boolean(data.active),
+      type: data.active?.driver ? 'trip' : 'ride_request',
+      data: data.active,
+    };
   }
   if (path === '/client/trips' && method === 'GET') {
     return { success: true, trips: { data: data.trips } };
@@ -561,19 +648,8 @@ async function renderClient() {
   const trips = extractArray(tripsResponse, 'trips');
   const fare = fareResponse.fare;
   const firstName = escapeHtml((sessionUser.name || '').trim().split(/\s+/)[0] || 'viajero/a');
-  const activeLocation = active?.driver?.latest_location;
-  const mapUrl = activeLocation?.latitude && activeLocation?.longitude
-    ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(activeLocation.latitude)}&mlon=${encodeURIComponent(activeLocation.longitude)}#map=16/${encodeURIComponent(activeLocation.latitude)}/${encodeURIComponent(activeLocation.longitude)}`
-    : null;
-  const activeHtml = active ? `
-    <article class="active-ride">
-      <div class="active-ride-top"><div><span class="ride-label">VIAJE #${escapeHtml(active.id)}</span><h3>${escapeHtml(STATUS_LABELS[active.status] || active.status || 'En proceso')}</h3></div>${statusBadge(active.status)}</div>
-      <div class="route-summary">${tripPath(active.origin_name, active.destination_name)}</div>
-      ${active.driver ? `<div class="driver-summary"><span class="driver-avatar" aria-hidden="true">${escapeHtml((active.driver.user?.name || 'C').slice(0, 1))}</span><div><strong>${escapeHtml(active.driver.user?.name || 'Conductor asignado')}</strong><span>${escapeHtml(active.driver.user?.phone || 'Tu conductor')}</span></div></div>` : ''}
-      ${active.vehicle ? `<p class="vehicle-summary">${escapeHtml([active.vehicle.color, active.vehicle.brand, active.vehicle.model, active.vehicle.plate].filter(Boolean).join(' · '))}</p>` : ''}
-      <div class="active-ride-bottom"><div><span class="inline-meta">Valor estimado</span><strong class="fare-value">${money(active.estimated_fare || active.final_fare)}</strong></div><div class="record-actions">${mapUrl ? `<a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="${mapUrl}">Ver ubicación ↗</a>` : ''}${!['in_progress', 'completed', 'cancelled'].includes(active.status) ? `<button class="btn btn-danger btn-small" data-action="cancel-ride" data-id="${escapeHtml(active.id)}">Cancelar</button>` : ''}</div></div>
-    </article>` : emptyState('Cuando pidas un viaje, aquí podrás ver el estado y los datos de tu conductor.', '↗');
-  const tripsHtml = trips.length ? trips.slice(0, 5).map((trip) => `<article class="record trip-record"><div><h3>Viaje #${escapeHtml(trip.id)}</h3><p>${escapeHtml(trip.origin_name || trip.request?.origin_name || 'Origen')} → ${escapeHtml(trip.destination_name || trip.request?.destination_name || 'Destino')}</p><p>${escapeHtml(trip.driver?.user?.name || 'Conductor')} · ${escapeHtml(trip.vehicle?.plate || '')}</p><p>${dateTime(trip.completed_at || trip.created_at)}</p>${trip.status === 'completed' && !trip.rating ? `<div class="record-actions"><button class="btn btn-outline btn-small" data-action="rate-trip" data-id="${escapeHtml(trip.id)}">Calificar viaje</button></div>` : ''}</div><div class="record-right">${statusBadge(trip.status)}<p class="inline-meta" style="margin-top:9px">${money(trip.final_fare)}</p></div></article>`).join('') : emptyState('Tus viajes finalizados aparecerán aquí.', '◷');
+  const activeHtml = activeRideMarkup(active);
+  const tripsHtml = tripsMarkup(trips);
 
   app.innerHTML = `
     ${isDemoClient() ? '<div class="demo-mode-banner"><span aria-hidden="true">●</span><div><strong>Modo de demostración local</strong><span>Los viajes, tarifas y calificaciones de esta vista son ejemplos; nada se envía al servidor.</span></div></div>' : ''}
@@ -635,16 +711,353 @@ async function renderClient() {
         </form>
       </section>
       <div class="stack client-side-stack">
-        <section class="card section-card client-active-card"><div class="section-title"><div><p class="eyebrow">EN TIEMPO REAL</p><h2>Tu viaje actual</h2></div><button class="icon-button" aria-label="Actualizar viaje" data-action="refresh">↻</button></div>${activeHtml}</section>
-        <section class="card section-card client-history-card"><div class="section-title"><div><p class="eyebrow">TUS RECORRIDOS</p><h2>Actividad reciente</h2></div><span class="history-count">${trips.length} ${trips.length === 1 ? 'viaje' : 'viajes'}</span></div>${tripsHtml}</section>
+        <section class="card section-card client-active-card"><div class="section-title"><div><p class="eyebrow">EN TIEMPO REAL</p><h2>Tu viaje actual</h2></div><button class="icon-button" aria-label="Actualizar viaje" data-action="refresh">↻</button></div><div id="active-ride-slot">${activeHtml}</div></section>
+        <section class="card section-card client-history-card"><div class="section-title"><div><p class="eyebrow">TUS RECORRIDOS</p><h2>Actividad reciente</h2></div><span class="history-count">${trips.length} ${trips.length === 1 ? 'viaje' : 'viajes'}</span></div><div id="trips-slot">${tripsHtml}</div>${trips.length > 5 ? `<button class="btn btn-outline btn-small full-width" data-action="toggle-trips">${showAllTrips ? 'Ver menos' : `Ver los ${trips.length} viajes`}</button>` : ''}</section>
       </div>
     </div>`;
-  window.setTimeout(initializeClientMap, 0);
+  window.setTimeout(() => {
+    initializeClientMap();
+    startActiveRideTracking(active);
+  }, 0);
 }
+
+let clientTripsCache = [];
+
+function tripsMarkup(trips) {
+  clientTripsCache = trips;
+  if (!trips.length) return emptyState('Tus viajes finalizados aparecerán aquí.', '◷');
+  const visible = showAllTrips ? trips : trips.slice(0, 5);
+  return visible.map((trip) => {
+    const ratingScore = trip.rating?.score;
+    const canRate = trip.status === 'completed' && !trip.rating;
+    return `<article class="record trip-record"><div><h3>Viaje #${escapeHtml(trip.id)}</h3>
+      <p>${escapeHtml(trip.origin_name || trip.request?.origin_name || 'Origen')} → ${escapeHtml(trip.destination_name || trip.request?.destination_name || 'Destino')}</p>
+      <p>${escapeHtml(trip.driver?.user?.name || 'Conductor')}${trip.vehicle?.plate ? ` · ${escapeHtml(trip.vehicle.plate)}` : ''}</p>
+      <p>${dateTime(trip.completed_at || trip.created_at)}</p>
+      ${trip.cancellation_reason ? `<p>Motivo: ${escapeHtml(trip.cancellation_reason)}</p>` : ''}
+      ${ratingScore ? `<p class="trip-rating" aria-label="Calificaste con ${escapeHtml(ratingScore)} de 5">${'★'.repeat(Number(ratingScore))}${'☆'.repeat(5 - Number(ratingScore))}</p>` : ''}
+      ${canRate ? `<div class="record-actions"><button class="btn btn-outline btn-small" data-action="rate-trip" data-id="${escapeHtml(trip.id)}">Calificar viaje</button></div>` : ''}
+      </div><div class="record-right">${statusBadge(trip.status)}<p class="inline-meta" style="margin-top:9px">${money(trip.final_fare)}</p></div></article>`;
+  }).join('');
+}
+
+/* ---------- Viaje activo en tiempo real (estilo navegación) ---------- */
+
+function toPoint(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng) ? [lat, lng] : null;
+}
+
+function activeRidePoints(active) {
+  const source = active?.request || active || {};
+  const location = active?.driver?.latest_location;
+  return {
+    origin: toPoint(active?.origin_latitude ?? source.origin_latitude, active?.origin_longitude ?? source.origin_longitude),
+    destination: toPoint(active?.destination_latitude ?? source.destination_latitude, active?.destination_longitude ?? source.destination_longitude),
+    driver: location ? toPoint(location.latitude, location.longitude) : null,
+  };
+}
+
+const RIDE_PHASE_TEXT = {
+  requested: 'Estamos buscando un conductor cerca de ti…',
+  assigned: 'Tu conductor va en camino al punto de recogida.',
+  driver_arrived: 'Tu conductor llegó. Sal a su encuentro.',
+  in_progress: 'Vas camino a tu destino.',
+};
+
+function activeRideMarkup(active) {
+  if (!active) return emptyState('Cuando pidas un viaje, aquí podrás ver en vivo por dónde va tu conductor.', '↗');
+  const points = activeRidePoints(active);
+  const hasMap = Boolean(points.origin || points.destination || points.driver);
+  const driverName = active.driver?.user?.name || 'Conductor asignado';
+  const rating = Number(active.driver?.rating_average);
+  const cancellable = !['in_progress', 'completed', 'cancelled'].includes(active.status);
+  return `
+    <article class="active-ride" data-status="${escapeHtml(active.status)}">
+      <div class="active-ride-top"><div><span class="ride-label">VIAJE #${escapeHtml(active.id)}</span><h3>${escapeHtml(STATUS_LABELS[active.status] || active.status || 'En proceso')}</h3></div>${statusBadge(active.status)}</div>
+      <p class="ride-phase">${active.status === 'requested' ? '<span class="searching-dot" aria-hidden="true"></span>' : ''}${escapeHtml(RIDE_PHASE_TEXT[active.status] || 'Sigue el estado de tu viaje aquí.')}</p>
+      ${hasMap ? `<div class="live-map-wrap">
+        <div id="active-map" class="active-map" role="application" aria-label="Mapa en vivo del viaje"></div>
+        <div class="nav-banner" id="nav-banner" aria-live="polite"><span class="nav-banner-icon" aria-hidden="true">➤</span><div><strong id="nav-eta">Calculando ruta…</strong><span id="nav-detail">${active.driver ? 'Ubicando a tu conductor' : 'Ruta de tu viaje'}</span></div></div>
+        <button type="button" class="map-follow-button active" data-action="toggle-follow" aria-pressed="true" title="Seguir al conductor">◎ Seguir</button>
+        <span class="live-chip"><span aria-hidden="true"></span>EN VIVO</span>
+      </div>` : ''}
+      <div class="route-summary">${tripPath(active.origin_name || active.request?.origin_name, active.destination_name || active.request?.destination_name)}</div>
+      ${active.driver ? `<div class="driver-summary"><span class="driver-avatar" aria-hidden="true">${escapeHtml(driverName.slice(0, 1))}</span><div><strong>${escapeHtml(driverName)}${Number.isFinite(rating) && rating > 0 ? ` <span class="driver-rating">★ ${rating.toFixed(2)}</span>` : ''}</strong><span>${escapeHtml(active.driver.user?.phone || 'Tu conductor')}</span></div>${active.driver.user?.phone ? `<a class="btn btn-outline btn-small driver-call" href="tel:${escapeHtml(active.driver.user.phone)}">Llamar</a>` : ''}</div>` : ''}
+      ${active.vehicle ? `<p class="vehicle-summary"><span class="plate">${escapeHtml(active.vehicle.plate || '')}</span>${escapeHtml([active.vehicle.color, active.vehicle.brand, active.vehicle.model].filter(Boolean).join(' · '))}</p>` : ''}
+      <div class="active-ride-bottom"><div><span class="inline-meta">Valor estimado</span><strong class="fare-value">${money(active.estimated_fare || active.final_fare)}</strong></div><div class="record-actions">${cancellable ? `<button class="btn btn-danger btn-small" data-action="cancel-ride" data-id="${escapeHtml(active.id)}">Cancelar viaje</button>` : ''}</div></div>
+    </article>`;
+}
+
+let followDriver = true;
+const routeCache = new Map();
+
+function carIcon(bearing = 0) {
+  return L.divIcon({
+    className: 'car-marker-wrapper',
+    html: `<span class="car-marker"><span class="car-arrow" style="transform:rotate(${bearing}deg)">➤</span></span>`,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+  });
+}
+
+function bearingBetween(from, to) {
+  const radians = (degrees) => degrees * Math.PI / 180;
+  const y = Math.sin(radians(to[1] - from[1])) * Math.cos(radians(to[0]));
+  const x = Math.cos(radians(from[0])) * Math.sin(radians(to[0]))
+    - Math.sin(radians(from[0])) * Math.cos(radians(to[0])) * Math.cos(radians(to[1] - from[1]));
+  // El ícono ➤ apunta al este; se resta 90° para alinearlo con el norte.
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360 - 90;
+}
+
+function straightDistanceKm(a, b) {
+  const radians = (degrees) => degrees * Math.PI / 180;
+  const h = Math.sin(radians(b[0] - a[0]) / 2) ** 2
+    + Math.cos(radians(a[0])) * Math.cos(radians(b[0])) * Math.sin(radians(b[1] - a[1]) / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+// Ruta por calles reales usando el servicio público de OSRM (OpenStreetMap).
+// Si no responde, se usa una línea recta como respaldo.
+async function fetchRoadRoute(from, to) {
+  const key = [...from, ...to].map((value) => value.toFixed(4)).join(',');
+  if (routeCache.has(key)) return routeCache.get(key);
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Ruta no disponible');
+    const payload = await response.json();
+    const route = payload.routes?.[0];
+    if (!route) throw new Error('Ruta no disponible');
+    const result = {
+      coordinates: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+      distanceKm: route.distance / 1000,
+      durationMin: route.duration / 60,
+      road: true,
+    };
+    routeCache.set(key, result);
+    if (routeCache.size > 40) routeCache.delete(routeCache.keys().next().value);
+    return result;
+  } catch {
+    const distanceKm = straightDistanceKm(from, to);
+    return { coordinates: [from, to], distanceKm, durationMin: distanceKm / 25 * 60, road: false };
+  }
+}
+
+function setNavBanner(eta, detail) {
+  const etaElement = document.querySelector('#nav-eta');
+  const detailElement = document.querySelector('#nav-detail');
+  if (etaElement) etaElement.textContent = eta;
+  if (detailElement) detailElement.textContent = detail;
+}
+
+function animateMarker(marker, to, duration = 1200) {
+  const from = marker.getLatLng();
+  const start = performance.now();
+  const frame = (now) => {
+    const progress = Math.min(1, (now - start) / duration);
+    const eased = 1 - (1 - progress) ** 3;
+    marker.setLatLng([from.lat + (to[0] - from.lat) * eased, from.lng + (to[1] - from.lng) * eased]);
+    if (progress < 1 && activeRideMap) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+async function drawActiveRide(active, firstDraw = false) {
+  if (!activeRideMap || !activeRideLayers) return;
+  const points = activeRidePoints(active);
+  const layers = activeRideLayers;
+
+  for (const point of ['origin', 'destination']) {
+    if (points[point] && !layers[point]) {
+      layers[point] = L.marker(points[point], { icon: mapIcon(point), interactive: false }).addTo(activeRideMap);
+    }
+  }
+
+  if (points.driver) {
+    if (!layers.driver) {
+      layers.driver = L.marker(points.driver, { icon: carIcon(0), zIndexOffset: 1000, title: 'Tu conductor' }).addTo(activeRideMap);
+    } else {
+      const previous = layers.driver.getLatLng();
+      const previousPoint = [previous.lat, previous.lng];
+      if (straightDistanceKm(previousPoint, points.driver) > 0.003) {
+        layers.driver.setIcon(carIcon(bearingBetween(previousPoint, points.driver)));
+        animateMarker(layers.driver, points.driver);
+      }
+    }
+  }
+
+  // Tramo que se muestra: conductor → recogida antes de llegar, y luego hacia el destino.
+  const goingToPickup = ['assigned'].includes(active.status);
+  const legStart = points.driver && ['assigned', 'in_progress'].includes(active.status) ? points.driver : points.origin;
+  const legEnd = goingToPickup ? points.origin : points.destination;
+
+  if (legStart && legEnd) {
+    const route = await fetchRoadRoute(legStart, legEnd);
+    if (!activeRideMap) return;
+    if (layers.routeCasing) layers.routeCasing.setLatLngs(route.coordinates);
+    else layers.routeCasing = L.polyline(route.coordinates, { color: '#263238', weight: 9, opacity: 0.9, lineCap: 'round' }).addTo(activeRideMap);
+    if (layers.route) layers.route.setLatLngs(route.coordinates);
+    else layers.route = L.polyline(route.coordinates, { color: '#B0BEC5', weight: 5, opacity: 1, lineCap: 'round' }).addTo(activeRideMap);
+    layers.driver?.bringToFront?.();
+
+    const minutes = Math.max(1, Math.round(route.durationMin));
+    const arrival = new Date(Date.now() + minutes * 60000);
+    const arrivalText = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit' }).format(arrival);
+    const distance = route.distanceKm < 1 ? `${Math.round(route.distanceKm * 1000)} m` : `${route.distanceKm.toFixed(1)} km`;
+    if (active.status === 'assigned') setNavBanner(`Llega en ${minutes} min`, `${distance} para recogerte · ${arrivalText}`);
+    else if (active.status === 'in_progress') setNavBanner(`${minutes} min a tu destino`, `${distance} restantes · llegada ${arrivalText}`);
+    else if (active.status === 'driver_arrived') setNavBanner('Tu conductor está afuera', `Viaje de ${distance} · unos ${minutes} min`);
+    else setNavBanner(`Viaje de ${minutes} min`, `${distance} por la ruta sugerida`);
+    if (!route.road) setNavBanner(document.querySelector('#nav-eta')?.textContent || '', 'Ruta aproximada (sin servicio de calles)');
+  } else if (active.status === 'requested') {
+    setNavBanner('Buscando conductor', 'Te avisaremos apenas uno acepte');
+  }
+
+  if (firstDraw || !followDriver) {
+    if (firstDraw) {
+      const bounds = [points.driver, points.origin, points.destination].filter(Boolean);
+      if (bounds.length > 1) activeRideMap.fitBounds(L.latLngBounds(bounds), { padding: [50, 50], maxZoom: 16 });
+      else if (bounds.length === 1) activeRideMap.setView(bounds[0], 15);
+    }
+  }
+  if (followDriver && points.driver && !firstDraw) {
+    activeRideMap.panTo(points.driver, { animate: true, duration: 1 });
+  }
+}
+
+function initActiveRideMap(active) {
+  destroyActiveRideMap();
+  const element = document.querySelector('#active-map');
+  if (!element || !window.L) return;
+  activeRideMap = L.map(element, { zoomControl: false, attributionControl: true }).setView([4.6533, -74.0836], 13);
+  L.control.zoom({ position: 'bottomright' }).addTo(activeRideMap);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+  }).addTo(activeRideMap);
+  activeRideMap.on('dragstart', () => setFollow(false));
+  activeRideLayers = {};
+  window.setTimeout(() => activeRideMap?.invalidateSize(), 50);
+  drawActiveRide(active, true);
+}
+
+function setFollow(value) {
+  followDriver = value;
+  const button = document.querySelector('[data-action="toggle-follow"]');
+  if (button) {
+    button.classList.toggle('active', value);
+    button.setAttribute('aria-pressed', String(value));
+  }
+  const driver = activeRideLayers?.driver?.getLatLng();
+  if (value && driver && activeRideMap) activeRideMap.setView(driver, Math.max(activeRideMap.getZoom(), 16), { animate: true });
+}
+
+function startActiveRideTracking(active) {
+  stopActiveRidePolling();
+  activeRideStatus = active?.status || null;
+  if (!active) return;
+  followDriver = true;
+  initActiveRideMap(active);
+  scheduleActiveRidePoll();
+}
+
+function scheduleActiveRidePoll() {
+  stopActiveRidePolling();
+  activeRidePoll = setTimeout(pollActiveRide, isDemoClient() ? 3000 : ACTIVE_RIDE_POLL_MS);
+}
+
+async function pollActiveRide() {
+  activeRidePoll = null;
+  if (!document.querySelector('#active-ride-slot') || sessionUser?.role !== 'client') return;
+  try {
+    const active = findActive(await request('/client/active'));
+    if (!active) {
+      showToast(activeRideStatus === 'in_progress' ? '¡Llegaste! Tu viaje finalizó. No olvides calificarlo.' : 'Tu viaje ya no está activo.');
+      await renderDashboard();
+      return;
+    }
+    if (active.status !== activeRideStatus) {
+      if (active.status === 'assigned') showToast('¡Encontramos conductor! Ya va en camino.');
+      if (active.status === 'driver_arrived') showToast('Tu conductor llegó al punto de recogida.');
+      if (active.status === 'in_progress') showToast('Tu viaje comenzó. ¡Buen recorrido!');
+      const slot = document.querySelector('#active-ride-slot');
+      if (slot) slot.innerHTML = activeRideMarkup(active);
+      const keepFollow = followDriver;
+      startActiveRideTracking(active);
+      setFollow(keepFollow);
+      return;
+    }
+    await drawActiveRide(active);
+  } catch (error) {
+    setNavBanner('Sin conexión', 'Reintentando actualizar la ubicación…');
+  }
+  scheduleActiveRidePoll();
+}
+
+/* ---------- Ventanas (cancelar y calificar) ---------- */
+
+function openModal(content, labelledBy) {
+  closeModal();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `<div class="modal card" role="dialog" aria-modal="true" aria-labelledby="${labelledBy}">${content}</div>`;
+  backdrop.addEventListener('click', (event) => { if (event.target === backdrop) closeModal(); });
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('visible'));
+  backdrop.querySelector('input, select, textarea, button:not([data-action="close-modal"])')?.focus();
+}
+
+function closeModal() {
+  document.querySelectorAll('.modal-backdrop').forEach((element) => element.remove());
+}
+
+function openCancelModal(id) {
+  openModal(`
+    <h2 id="modal-title">Cancelar viaje</h2>
+    <p class="muted">Cuéntanos por qué cancelas. Solo puedes cancelar antes de que inicie el recorrido.</p>
+    <form id="cancel-form" data-id="${escapeHtml(id)}">
+      <fieldset class="reason-list"><legend class="sr-only">Motivo</legend>
+        ${CANCEL_REASONS.map((reason, index) => `<label class="reason-option"><input type="radio" name="reason" value="${escapeHtml(reason)}" ${index === 0 ? 'checked' : ''}><span>${escapeHtml(reason)}</span></label>`).join('')}
+        <label class="reason-option"><input type="radio" name="reason" value="other"><span>Otro motivo</span></label>
+      </fieldset>
+      <div class="field" id="other-reason-field" hidden><label for="other_reason">Escribe el motivo</label><textarea id="other_reason" name="other_reason" maxlength="255"></textarea></div>
+      <div class="modal-actions"><button type="button" class="btn btn-outline" data-action="close-modal">Volver</button><button type="submit" class="btn btn-danger-solid">Cancelar viaje</button></div>
+    </form>`, 'modal-title');
+}
+
+function openRatingModal(id) {
+  selectedRating = 5;
+  const trip = clientTripsCache.find((item) => String(item.id) === String(id));
+  openModal(`
+    <h2 id="modal-title">Califica tu viaje</h2>
+    <p class="muted">${trip ? `Viaje #${escapeHtml(trip.id)} con ${escapeHtml(trip.driver?.user?.name || 'tu conductor')}` : 'Tu opinión ayuda a mejorar el servicio.'}</p>
+    <form id="rating-form" data-id="${escapeHtml(id)}">
+      <div class="rating-stars rating-stars-large" role="radiogroup" aria-label="Calificación de 1 a 5">
+        ${[1, 2, 3, 4, 5].map((value) => `<button type="button" class="star-button selected" data-rating="${value}" aria-label="${value} ${value === 1 ? 'estrella' : 'estrellas'}">★</button>`).join('')}
+      </div>
+      <p class="rating-caption" id="rating-caption">Excelente</p>
+      <div class="field"><label for="rating_comment">Comentario (opcional)</label><textarea id="rating_comment" name="comment" maxlength="500" placeholder="¿Cómo estuvo tu viaje?"></textarea></div>
+      <label class="incident-check"><input type="checkbox" name="has_incident"><span>Quiero reportar una incidencia en este viaje</span></label>
+      <div class="modal-actions"><button type="button" class="btn btn-outline" data-action="close-modal">Ahora no</button><button type="submit" class="btn btn-primary">Enviar calificación</button></div>
+    </form>`, 'modal-title');
+}
+
+const RATING_CAPTIONS = ['', 'Muy malo', 'Malo', 'Regular', 'Bueno', 'Excelente'];
 
 function estimateMarkup(estimate) {
   const source = estimate.demo ? 'Cálculo local · modo demo' : 'Estimación de la API';
-  return `<div class="trip-result"><div><div class="inline-meta">${escapeHtml(estimate.distance_km)} km · ${escapeHtml(estimate.duration_min)} min aprox.</div><div class="field-hint">${source} · ${escapeHtml(estimate.currency || 'COP')}</div></div><div class="fare-value">${money(estimate.estimated_fare)}</div></div>`;
+  const breakdown = estimate.fare_breakdown;
+  const surge = Number(breakdown?.surge_multiplier);
+  const breakdownHtml = breakdown ? `<dl class="fare-breakdown">
+      <div><dt>Tarifa base</dt><dd>${money(breakdown.base_fare)}</dd></div>
+      <div><dt>${escapeHtml(estimate.distance_km)} km × ${money(breakdown.price_per_km)}</dt><dd>${money(Number(estimate.distance_km) * Number(breakdown.price_per_km))}</dd></div>
+      <div><dt>${escapeHtml(estimate.duration_min)} min × ${money(breakdown.price_per_minute)}</dt><dd>${money(Number(estimate.duration_min) * Number(breakdown.price_per_minute))}</dd></div>
+      ${Number.isFinite(surge) && surge !== 1 ? `<div class="surge"><dt>Tarifa dinámica</dt><dd>× ${escapeHtml(surge)}</dd></div>` : ''}
+      <div><dt>Tarifa mínima</dt><dd>${money(breakdown.minimum_fare)}</dd></div>
+    </dl>` : '';
+  return `<div class="trip-result-wrap"><div class="trip-result"><div><div class="inline-meta">${escapeHtml(estimate.distance_km)} km · ${escapeHtml(estimate.duration_min)} min aprox.</div><div class="field-hint">${source} · ${escapeHtml(estimate.currency || 'COP')}</div></div><div class="fare-value">${money(estimate.estimated_fare)}</div></div>${breakdownHtml}</div>`;
 }
 
 async function renderDriver() {
@@ -803,22 +1216,40 @@ async function requestRide(form) {
   await renderDashboard();
 }
 
-async function cancelRide(id) {
-  if (!window.confirm('¿Seguro que quieres cancelar este viaje?')) return;
-  const reason = window.prompt('Motivo de cancelación (opcional):') || 'Cancelación solicitada por el cliente';
-  const result = await request(`/client/cancel/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify({ reason }) });
-  showToast(result.message || 'Viaje cancelado.');
-  await renderDashboard();
+async function cancelRide(form) {
+  const values = getFormData(form);
+  const reason = values.reason === 'other' ? (values.other_reason || '').trim() : values.reason;
+  if (!reason) {
+    showToast('Escribe el motivo de la cancelación.', true);
+    return;
+  }
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    const result = await request(`/client/cancel/${encodeURIComponent(form.dataset.id)}`, { method: 'POST', body: JSON.stringify({ reason }) });
+    closeModal();
+    showToast(result.message || 'Viaje cancelado.');
+    await renderDashboard();
+  } finally {
+    button.disabled = false;
+  }
 }
 
-async function submitRating(id) {
-  const score = selectedRating;
-  const comment = window.prompt(`Calificación: ${score} de 5 estrellas. ¿Quieres agregar un comentario?`) || '';
-  const result = await request(`/client/trips/${encodeURIComponent(id)}/rating`, {
-    method: 'POST', body: JSON.stringify({ score, comment, has_incident: false }),
-  });
-  showToast(result.message || 'Gracias por calificar tu viaje.');
-  await renderDashboard();
+async function submitRating(form) {
+  const values = getFormData(form);
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    const result = await request(`/client/trips/${encodeURIComponent(form.dataset.id)}/rating`, {
+      method: 'POST',
+      body: JSON.stringify({ score: selectedRating, comment: (values.comment || '').trim(), has_incident: Boolean(values.has_incident) }),
+    });
+    closeModal();
+    showToast(result.message || 'Gracias por calificar tu viaje.');
+    await renderDashboard();
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function driverAction(action, id) {
@@ -883,6 +1314,12 @@ async function handleSubmit(event) {
   } else if (form.id === 'ride-form') {
     event.preventDefault();
     try { await requestRide(form); } catch (error) { showToast(error.message, true); }
+  } else if (form.id === 'cancel-form') {
+    event.preventDefault();
+    try { await cancelRide(form); } catch (error) { showToast(error.message, true); }
+  } else if (form.id === 'rating-form') {
+    event.preventDefault();
+    try { await submitRating(form); } catch (error) { showToast(error.message, true); }
   } else if (form.id === 'fare-form') {
     event.preventDefault();
     try { await saveFare(form); } catch (error) { showToast(error.message, true); }
@@ -960,8 +1397,16 @@ async function handleClick(event) {
     else if (action === 'focus-ride') document.querySelector('#origin_name')?.focus();
     else if (action === 'estimate-fare') {
       try { await estimateFare(); } catch (error) { showToast(error.message, true); }
-    } else if (action === 'cancel-ride') await cancelRide(target.dataset.id);
-    else if (action === 'rate-trip') await submitRating(target.dataset.id);
+    } else if (action === 'cancel-ride') openCancelModal(target.dataset.id);
+    else if (action === 'rate-trip') openRatingModal(target.dataset.id);
+    else if (action === 'close-modal') closeModal();
+    else if (action === 'toggle-follow') setFollow(!followDriver);
+    else if (action === 'toggle-trips') {
+      showAllTrips = !showAllTrips;
+      const slot = document.querySelector('#trips-slot');
+      if (slot) slot.innerHTML = tripsMarkup(clientTripsCache);
+      target.textContent = showAllTrips ? 'Ver menos' : `Ver los ${clientTripsCache.length} viajes`;
+    }
     else if (['accept-ride', 'trip-arrive', 'trip-start', 'trip-complete'].includes(action)) await driverAction(action, target.dataset.id);
     else if (action === 'availability') {
       const result = await request('/driver/availability', { method: 'PUT', body: JSON.stringify({ status: target.dataset.status }) });
@@ -984,6 +1429,12 @@ document.addEventListener('change', async (event) => {
     const isDriver = event.target.value === 'driver';
     fields.hidden = !isDriver;
     fields.querySelectorAll('input').forEach((input) => { input.required = isDriver; });
+  } else if (event.target.name === 'reason' && event.target.closest('#cancel-form')) {
+    const other = document.querySelector('#other-reason-field');
+    const isOther = event.target.value === 'other';
+    other.hidden = !isOther;
+    other.querySelector('textarea').required = isOther;
+    if (isOther) other.querySelector('textarea').focus();
   } else if (event.target.id === 'driver-filter') {
     try { await renderDashboard(); } catch (error) { showToast(error.message, true); }
   } else if (event.target.matches('[data-action="driver-approval"]')) {
@@ -1008,6 +1459,12 @@ document.addEventListener('click', (event) => {
   document.querySelectorAll('[data-rating]').forEach((button) => {
     button.classList.toggle('selected', Number(button.dataset.rating) <= selectedRating);
   });
+  const caption = document.querySelector('#rating-caption');
+  if (caption) caption.textContent = RATING_CAPTIONS[selectedRating] || '';
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeModal();
 });
 
 async function init() {
