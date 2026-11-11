@@ -63,7 +63,12 @@ let activeRideStatus = null;
 // ¿El historial muestra todos los viajes o solo los 5 últimos?
 let showAllTrips = false;
 // Cada cuánto se consulta la ubicación del conductor (milisegundos).
-const ACTIVE_RIDE_POLL_MS = 10000;
+const ACTIVE_RIDE_POLL_MS = 5000;
+// Llave donde se recuerda el último viaje pedido (origen, destino y nombres).
+// La API, una vez asignado el conductor, devuelve el viaje SIN las coordenadas
+// de origen y destino (ver GET /client/active en la documentación); con esto
+// el mapa en vivo puede seguir mostrando la ruta completa.
+const LAST_RIDE_KEY = 'rueda_last_ride';
 // Motivos rápidos que se ofrecen al cancelar un viaje.
 const CANCEL_REASONS = [
   'Cambio de planes',
@@ -579,11 +584,18 @@ async function demoRequest(path, options = {}) {
   }
   if (path === '/client/active' && method === 'GET') {
     advanceDemoRide(data);
+    // Igual que la API real: cuando ya hay conductor, el viaje llega SIN
+    // coordenadas ni nombres de origen/destino (solo conductor y vehículo).
+    let payload = data.active;
+    if (payload?.driver) {
+      payload = { ...payload };
+      for (const key of ['origin_name', 'origin_latitude', 'origin_longitude', 'destination_name', 'destination_latitude', 'destination_longitude']) delete payload[key];
+    }
     return {
       success: true,
       has_active: Boolean(data.active),
       type: data.active?.driver ? 'trip' : 'ride_request',
-      data: data.active,
+      data: payload,
     };
   }
   if (path === '/client/trips' && method === 'GET') {
@@ -928,6 +940,7 @@ async function renderClient() {
     request('/client/active'), request('/client/trips'), request('/fares/active'),
   ]);
   const active = findActive(activeResponse);
+  if (!active) clearLastRide();
   const trips = extractArray(tripsResponse, 'trips');
   const fare = fareResponse.fare;
   const firstName = escapeHtml((sessionUser.name || '').trim().split(/\s+/)[0] || 'viajero/a');
@@ -1037,13 +1050,21 @@ function toPoint(latitude, longitude) {
 
 // Puntos del viaje activo: recogida, destino y ubicación del conductor.
 function activeRidePoints(active) {
-  const source = active?.request || active || {};
-  const location = active?.driver?.latest_location;
+  const source = active?.request || active?.ride_request || {};
+  const saved = readLastRide();
+  const location = active?.driver?.latest_location || active?.driver_location || active?.latest_location;
+  // Orden de búsqueda: el viaje → su solicitud → lo que se guardó al pedirlo.
+  const pick = (key) => active?.[key] ?? source[key] ?? saved[key];
   return {
-    origin: toPoint(active?.origin_latitude ?? source.origin_latitude, active?.origin_longitude ?? source.origin_longitude),
-    destination: toPoint(active?.destination_latitude ?? source.destination_latitude, active?.destination_longitude ?? source.destination_longitude),
+    origin: toPoint(pick('origin_latitude'), pick('origin_longitude')),
+    destination: toPoint(pick('destination_latitude'), pick('destination_longitude')),
     driver: location ? toPoint(location.latitude, location.longitude) : null,
   };
+}
+
+// Nombre de origen o destino del viaje activo, con el mismo respaldo.
+function activeRideName(active, key) {
+  return active?.[key] || active?.request?.[key] || active?.ride_request?.[key] || readLastRide()[key];
 }
 
 // Mensaje que acompaña cada estado del viaje activo.
@@ -1072,7 +1093,7 @@ function activeRideMarkup(active) {
         <button type="button" class="map-follow-button active" data-action="toggle-follow" aria-pressed="true" title="Seguir al conductor">◎ Seguir</button>
         <span class="live-chip"><span aria-hidden="true"></span>EN VIVO</span>
       </div>` : ''}
-      <div class="route-summary">${tripPath(active.origin_name || active.request?.origin_name, active.destination_name || active.request?.destination_name)}</div>
+      <div class="route-summary">${tripPath(activeRideName(active, 'origin_name'), activeRideName(active, 'destination_name'))}</div>
       ${active.driver ? `<div class="driver-summary"><span class="driver-avatar" aria-hidden="true">${escapeHtml(driverName.slice(0, 1))}</span><div><strong>${escapeHtml(driverName)}${Number.isFinite(rating) && rating > 0 ? ` <span class="driver-rating">★ ${rating.toFixed(2)}</span>` : ''}</strong><span>${escapeHtml(active.driver.user?.phone || 'Tu conductor')}</span></div>${active.driver.user?.phone ? `<a class="btn btn-outline btn-small driver-call" href="tel:${escapeHtml(active.driver.user.phone)}">Llamar</a>` : ''}</div>` : ''}
       ${active.vehicle ? `<p class="vehicle-summary"><span class="plate">${escapeHtml(active.vehicle.plate || '')}</span>${escapeHtml([active.vehicle.color, active.vehicle.brand, active.vehicle.model].filter(Boolean).join(' · '))}</p>` : ''}
       <div class="active-ride-bottom"><div><span class="inline-meta">Valor estimado</span><strong class="fare-value">${money(active.estimated_fare || active.final_fare)}</strong></div><div class="record-actions">${cancellable ? `<button class="btn btn-danger btn-small" data-action="cancel-ride" data-id="${escapeHtml(active.id)}">Cancelar viaje</button>` : ''}</div></div>
@@ -1183,6 +1204,17 @@ async function drawActiveRide(active, firstDraw = false) {
         animateMarker(layers.driver, points.driver);
       }
     }
+  }
+
+  // Conductor asignado pero sin GPS: no hay cómo calcular cuánto le falta.
+  if (['assigned', 'in_progress'].includes(active.status) && !points.driver) {
+    setNavBanner(active.status === 'assigned' ? 'Conductor en camino' : 'Viaje en curso', 'Esperando la ubicación GPS del conductor…');
+    if (firstDraw) {
+      const bounds = [points.origin, points.destination].filter(Boolean);
+      if (bounds.length > 1) activeRideMap.fitBounds(L.latLngBounds(bounds), { padding: [50, 50], maxZoom: 16 });
+      else if (bounds.length === 1) activeRideMap.setView(bounds[0], 15);
+    }
+    return;
   }
 
   // Tramo que se muestra: conductor → recogida antes de llegar, y luego hacia el destino.
@@ -1450,10 +1482,40 @@ async function requestRide(form) {
   if (!form.reportValidity()) return;
   const values = getFormData(form);
   for (const key of ['origin_latitude', 'origin_longitude', 'destination_latitude', 'destination_longitude']) values[key] = Number(values[key]);
-  const result = await request('/client/ride-requests', { method: 'POST', body: JSON.stringify(values) });
+  const button = form.querySelector('[type="submit"]');
+  if (button) button.disabled = true;
+  let result;
+  try {
+    result = await request('/client/ride-requests', { method: 'POST', body: JSON.stringify(values) });
+  } catch (error) {
+    if (button) button.disabled = false;
+    // 400 = ya hay un viaje activo: se recarga el panel para mostrarlo.
+    if (error.status === 400) {
+      showToast(error.message, true);
+      await renderDashboard();
+      return;
+    }
+    throw error;
+  }
+  saveLastRide({ ...values, request_id: result.ride_request?.id ?? null });
   showToast(result.message || 'Tu solicitud fue enviada.');
   lastEstimate = null;
   await renderDashboard();
+}
+
+// Guarda el último viaje pedido en esta pestaña.
+function saveLastRide(ride) {
+  try { sessionStorage.setItem(LAST_RIDE_KEY, JSON.stringify(ride)); } catch { /* sin almacenamiento */ }
+}
+
+// Lee el último viaje pedido (o un objeto vacío).
+function readLastRide() {
+  try { return JSON.parse(sessionStorage.getItem(LAST_RIDE_KEY) || 'null') || {}; } catch { return {}; }
+}
+
+// Olvida el último viaje (cuando ya no hay viaje activo).
+function clearLastRide() {
+  sessionStorage.removeItem(LAST_RIDE_KEY);
 }
 
 // POST /client/cancel/{id} con el motivo elegido en la ventana.

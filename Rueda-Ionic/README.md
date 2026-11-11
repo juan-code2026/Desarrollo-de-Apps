@@ -62,6 +62,33 @@ Después, abran un pull request hacia `feat/rueda-ionic-frontend`.
 
 En la pantalla de inicio de sesión, pulsa **Demo de administrador**. Verás el resumen con KPIs y gráficas, la revisión de conductores (aprobar, rechazar y suspender), las tarifas con vista previa del precio, los viajes con filtros, los reportes y la auditoría, todo con datos ficticios.
 
+## Prueba en dos computadores (cliente ↔ conductor)
+
+Cada computador corre su propia copia de la app y los dos se conectan al mismo servidor del profesor (`http://20.20.1.22:8000/api`). El servidor es el que comunica a cliente y conductor.
+
+**Antes de empezar (en los dos computadores):**
+
+1. Conectarse a la red donde está el servidor del profesor.
+2. `git pull` en la rama `feat/rueda-ionic-frontend`, luego `npm install` y `npm start`.
+3. Abrir `http://localhost:4200`. Si la app no conecta, revisar en **Configuración de conexión** que la URL sea `http://20.20.1.22:8000/api`.
+4. Usar dos navegadores o dos computadores distintos: la sesión se guarda por pestaña, así que no se pisan.
+
+**Flujo de la prueba:**
+
+| Paso | Computador del cliente | Computador del conductor | Qué endpoint lo hace |
+|---|---|---|---|
+| 1 | Inicia sesión como cliente | Inicia sesión como conductor **aprobado** y se pone **en línea** | `POST /auth/login` · `PUT /driver/availability` |
+| 2 | Elige recogida y destino, **Calcular tarifa** y **Pedir viaje** | — | `POST /client/estimate-fare` · `POST /client/ride-requests` |
+| 3 | Ve "Buscando conductor…" | Ve la solicitud y la **acepta** | `GET /driver/ride-requests` · `POST /driver/ride-requests/{id}/accept` |
+| 4 | En máximo 5 s ve "Conductor asignado", el carro en el mapa y el tiempo de llegada | Envía su ubicación GPS cada pocos segundos | `GET /client/active` · `POST /driver/location` |
+| 5 | Ve "Tu conductor llegó" | Marca **Ya llegué** | `POST /driver/trips/{id}/arrive` |
+| 6 | Ve "En curso" y el carro avanzando al destino | **Inicia** el viaje | `POST /driver/trips/{id}/start` |
+| 7 | Recibe "¡Llegaste!" y puede **calificar** desde el historial | **Finaliza** el viaje | `POST /driver/trips/{id}/complete` · `POST /client/trips/{id}/rating` |
+
+**Importante para el panel del conductor:** el mapa del cliente solo se mueve si el conductor envía su ubicación con `POST /driver/location` (incluyendo `trip_id`) mientras tiene un viaje asignado o en curso. Por ejemplo, con `navigator.geolocation.watchPosition` cada 5 segundos. Si no la envía, el cliente verá "Esperando la ubicación GPS del conductor…".
+
+**Qué hace el panel del cliente durante la prueba:** consulta `GET /client/active` cada 5 segundos y avisa cada cambio de estado. Recuerda el origen y el destino que pidió, porque la API deja de enviarlos cuando hay conductor asignado. Si la sesión vence, vuelve al inicio de sesión.
+
 ## Estructura del código
 
 | Archivo | Qué contiene |
@@ -89,7 +116,7 @@ El JWT se conserva en `sessionStorage` durante la sesión de la pestaña. La dir
 - La documentación no describe un endpoint para consultar el viaje activo del conductor. La interfaz intenta `GET /driver/active`; si el backend no lo implementa, las solicitudes y demás acciones siguen disponibles, pero el viaje en curso del conductor requiere que el profesor agregue/documente ese endpoint.
 - La documentación tampoco especifica la forma de la respuesta de reportes y auditoría; la interfaz admite las estructuras de lista habituales de Laravel y muestra una respuesta alternativa cuando el reporte no contiene campos tabulares conocidos.
 - El panel de cliente incluye un mapa interactivo de OpenStreetMap: haz clic para colocar los puntos de recogida y destino, arrastra los marcadores para ajustarlos o usa la ubicación del dispositivo. El mapa requiere conexión a internet para cargar sus mosaicos; la ubicación del dispositivo solo se consulta cuando pulsas el botón y autorizas al navegador.
-- **Viaje en vivo (estilo navegación):** mientras el cliente tiene un viaje activo, el panel consulta `GET /client/active` cada 10 s y mueve el carro del conductor en el mapa. Muestra la ruta por calles reales (servicio público OSRM de OpenStreetMap), el tiempo y la distancia restantes y la hora estimada de llegada. El botón **Seguir** centra la cámara en el conductor. Si OSRM no responde, se dibuja una línea recta aproximada.
+- **Viaje en vivo (estilo navegación):** mientras el cliente tiene un viaje activo, el panel consulta `GET /client/active` cada 5 s y mueve el carro del conductor en el mapa. Muestra la ruta por calles reales (servicio público OSRM de OpenStreetMap), el tiempo y la distancia restantes y la hora estimada de llegada. El botón **Seguir** centra la cámara en el conductor. Si OSRM no responde, se dibuja una línea recta aproximada.
 - La cancelación y la calificación usan ventanas propias: motivo de cancelación, estrellas, comentario y reporte de incidencia (`has_incident`).
 - En el modo demo, un conductor ficticio se asigna a los pocos segundos y recorre el trayecto hasta el destino para probar el seguimiento en vivo.
 - En el modo demo, el mapa y la selección de puntos funcionan sin el backend; las solicitudes y demás datos siguen siendo locales y ficticios.
